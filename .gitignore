@@ -1,0 +1,39 @@
+# Python and environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local secrets and editor/OS files
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# Proprietary integrations: do not make exceptions here
+/private/
+
+# Generated measurements, datasets and model artifacts
+/results/*
+!/results/README.md
+/data/
+/artifacts/
+*.pt
+*.pth
+*.onnx
+*.engine
+*.plan
+*.safetensors
