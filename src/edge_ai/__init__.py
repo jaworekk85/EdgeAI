@@ -1,3 +1,3 @@
-"""EdgeAI research framework — Phase 0 package skeleton."""
+"""Hardware-independent core for reproducible EdgeAI research."""
 
 __version__ = "0.0.0"

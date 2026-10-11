@@ -1,0 +1,10 @@
+# Phase 1 contract fixture, not a runnable reference or research experiment.
+experiment: core-mock
+seed: 7
+model: configs/models/mock.yaml
+workload: configs/workloads/synthetic.yaml
+device: configs/devices/cpu.yaml
+protocol:
+  warmup_iterations: 2
+  iterations: 3
+  repetitions: 1

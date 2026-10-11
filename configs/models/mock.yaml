@@ -1,0 +1,9 @@
+id: mock-fp32
+family: synthetic-contract
+task: mock
+weights_source: synthetic-no-weights
+weights_digest: synthetic-no-artifact
+precision: fp32
+compression: configs/compression/none.yaml
+resolution: [8, 8]
+runtime: mock

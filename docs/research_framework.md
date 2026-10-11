@@ -1,8 +1,9 @@
 # Proposed research architecture — Phase 0
 
-Status: proposal for review. Only package scaffolding exists. Names below describe
-planned interfaces, not working implementations. The development specification
-remains authoritative.
+Status: Phase 0 reviewed against the specification on 2026-10-11; the user
+authorized the review and Phase 1 implementation together. The development
+specification remains authoritative. The phase table distinguishes implemented
+core contracts from planned later backends and experiments.
 
 ## Module responsibilities and implementation phases
 
@@ -118,8 +119,9 @@ before reserving any public output. Failed runs retain an explicit incomplete
 status and are excluded from completed-run comparisons.
 
 Standard outputs: `config.yaml`, `device.json`, `metrics.json`, `traces/`, `plots/`.
-The validated `RunRecord` is serialized in `metrics.json`; trace references are
-relative paths and carry units/schema metadata. Capture git commit and dirty flag,
+The validated `RunRecord` is serialized in `metrics.json`; raw traces are embedded
+in this self-contained record and mirrored in relative `traces/*.json` files with
+units/source metadata. Capture git commit and dirty flag,
 runtime versions, model identity and protocol before measurement.
 
 Validation will enforce:
@@ -155,7 +157,7 @@ above-idle results. Do not suggest per-inference sensor resolution when absent.
 | Jetson | Platform-provided CUDA/cuDNN/TensorRT; optional onboard tooling | 3 |
 | Compression | Backend-specific tools only when needed | 4 |
 
-Only the build/development declarations exist in Phase 0. Defer hardware extras
+Phase 1 adds PyYAML to the core dependencies and CPU/mock tests. Defer hardware extras
 and exact backend pins until compatible device software is known. Runtime versions
 are captured per run; reproducible CPU and Jetson environments will be documented
 separately. No Hydra, ROS2 dependency or plugin registry in the initial framework.
@@ -183,4 +185,25 @@ optional backend must have import tests proving its absence does not break core.
 - What JetPack/L4T installation is on the initial device? Capture it in Phase 3
   before selecting compatible hardware packages.
 
-Phase 0 ends here. Phase 1 begins only after review.
+## Phase 1 implementation decisions (2026-10-11)
+
+- Keep metadata in each owning subsystem, with standard-library dataclasses and
+  shared strict JSON conversion; reject unknown fields, invalid types, nonfinite
+  quantities and unsupported schema versions.
+- Use PyYAML only for config I/O. Resolve explicit fragment references within the
+  config root, then apply explicit overrides and save the complete resolved config.
+  Private fragments require private workload classification; private paths and
+  results are confined to the workspace private tree.
+- Capture the CPU host profile and Git/runtime provenance automatically. Missing
+  Git metadata is an error; unavailable hardware settings carry explicit reasons.
+- Bind a representative batch explicitly in the mock runtime. Mock power produces
+  deterministic timestamped samples and always declares synthetic provenance.
+- Integrate one explicitly selected power rail over a bounded window using the
+  trapezoidal rule. Store total energy and optional steady-window per-inference
+  energy with their methods; keep idle power separate.
+- Validate the complete record before reserving an exclusive directory. Write an
+  incomplete marker first and a completion marker last. Comparison reads accept
+  only completed records, and visible override output lists setting mismatches.
+- Phase 1 implements comparison checks and nominal/sparsity report descriptors;
+  plots, profiling, real models, controllers and perturbations retain their later
+  phase boundaries. No weights, datasets or research experiments are downloaded.

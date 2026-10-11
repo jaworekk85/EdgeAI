@@ -1,10 +1,18 @@
-# Test plan
+# CPU/mock tests
 
-Phase 0 contains no test suite. See `docs/research_framework.md` for the staged
-verification plan and specification section 11 for mandatory scientific tests.
+Run `python -m pytest -q` and `python -m ruff check src tests` from the repository
+after installing `.[dev]`. Tests need no Jetson, accelerator libraries, pretrained
+weights or datasets. All generated records use temporary directories.
 
-Phase 1 tests run on CPU with deterministic mocks and enforce record validation,
-energy provenance, immutable/private storage, trace integration and comparable
-settings. Later phases add warm-up exclusion, the CPU reference smoke run, controller
-contract checks and deterministic perturbations. Hardware-dependent tests use the
-configured `jetson` marker and must be skipped on unsupported hosts.
+Coverage includes strict config/schema validation, energy provenance, analytic
+trace integration and bounded windows, concurrent directory reservation, failed
+writes, private output routing, comparison mismatch refusal/visible overrides,
+baseline attribution, mock determinism/lifecycle, automatic CPU/Git metadata and
+imports with optional dependencies explicitly blocked. Symlink confinement tests
+skip when the operating system denies creation of directory symlinks.
+
+Measured-schema fixtures are generated test data, not physical sensor readings.
+Phase 1 checks declared warm-up exclusion and mock call accounting. Actual profiler
+warm-up exclusion and the CPU reference smoke run arrive in Phase 2; controller
+contracts in Phase 5 and deterministic perturbations in Phase 6. Hardware tests
+will use the `jetson` marker and skip on unsupported hosts.
