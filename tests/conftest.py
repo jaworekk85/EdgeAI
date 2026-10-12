@@ -14,6 +14,14 @@ from edge_ai.utils.provenance import Provenance
 WORKSPACE = Path(__file__).resolve().parents[1]
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--reference-prepared",
+        default=None,
+        help="Run the public four-worker smoke using this prepared.json path",
+    )
+
+
 @pytest.fixture
 def config():
     return load_config(Path("configs/experiments/core_mock.yaml"), workspace=WORKSPACE)
@@ -25,17 +33,24 @@ def record(config):
     power.start()
     trace = power.stop()
     return RunRecord(
-        run_id="20261011T100000000000Z_0123456789", config=config,
+        run_id="20261011T100000000000Z_0123456789",
+        config=config,
         provenance=Provenance(
-            git_commit="a" * 40, git_dirty=False,
-            captured_at_utc="2026-10-11T10:00:00+00:00", runtime_versions={"mock": "1"},
+            git_commit="a" * 40,
+            git_dirty=False,
+            captured_at_utc="2026-10-11T10:00:00+00:00",
+            runtime_versions={"mock": "1"},
         ),
         device=capture_device_profile(),
         timings=TimingTrace(
-            starts_s=(0.0, 0.1, 0.2), durations_s=(0.01, 0.02, 0.03),
-            warmup_iterations_excluded=2, measured=False, clock="synthetic",
+            starts_s=(0.0, 0.1, 0.2),
+            durations_s=(0.01, 0.02, 0.03),
+            warmup_iterations_excluded=2,
+            measured=False,
+            clock="synthetic",
         ),
-        memory=MemoryReport(method="synthetic fixture; unavailable"), run_duration_s=1.0,
+        memory=MemoryReport(method="synthetic fixture; unavailable"),
+        run_duration_s=1.0,
         power_trace=trace,
         energy=energy_from_trace(trace, rail="total", start_s=0, end_s=1, inference_count=3),
     )

@@ -17,6 +17,7 @@ class ModelVariant:
     compression: CompressionSpec
     resolution: tuple[int, int]
     runtime: str
+    architecture: str | None = None
 
     def __post_init__(self) -> None:
         validate_types(self)
@@ -24,5 +25,7 @@ class ModelVariant:
         for name in ("family", "task", "weights_source", "weights_digest", "precision", "runtime"):
             nonempty(getattr(self, name), name)
         resolution(self.resolution)
+        if self.architecture is not None:
+            nonempty(self.architecture, "architecture")
         if self.precision != self.compression.precision:
             raise ValueError("model precision and compression precision must agree")

@@ -1,8 +1,9 @@
 # Phase 1 core API
 
 The architecture review and core implementation were authorized together on
-2026-10-11. Real model execution, profiling runners and the reference experiment
-remain Phase 2 work. The examples below exercise contracts with synthetic data.
+2026-10-11. The examples below exercise the original contracts with synthetic
+data. Real CPU execution, profiling and reports now exist; see
+[CPU reference usage](cpu_reference.md) for the Phase 2 extensions.
 
 ## Configuration and mocks
 
@@ -65,14 +66,15 @@ hardware observations. Requested device settings are separate from observations.
 device profile, raw `TimingTrace`, `MemoryReport`, run duration, optional raw power
 trace/energy, task-quality metric/value and temperatures. Config includes the seed,
 model/compression identity, workload, protocol, baseline ID and changed components.
-Unknown metrics remain `None`. Schema version 1 is the only supported version.
+Unknown metrics remain `None`. Version 1 covers the original core; version 2 adds
+CPU execution/artifact/data/memory/idle provenance. Old version 1 files remain readable.
 
 Construct timings from measurement samples only; `warmup_iterations_excluded`
 must match the configured warm-up count and the sample count must match
 `iterations * repetitions`. Synthetic timings must declare `measured=False` and
 `clock="synthetic"`. `summary(batch_size)` derives mean, median, p95, p99 and
 explicitly scoped inferences/items per second. End-to-end timing is separate.
-Actual timing/synchronization/warm-up exclusion requires the Phase 2 runner.
+Actual timing/synchronization/warm-up exclusion uses the implemented Phase 2 runner.
 
 `energy_from_trace` integrates one explicitly selected rail using trapezoidal
 integration with interpolation at window edges. Extrapolation, nonmonotonic
@@ -113,4 +115,6 @@ Baseline attribution is recorded in config using `baseline_id` and
 `changed_components` (`model`, `compression`, `runtime`, `device_settings`). When
 the referenced baseline is among the compared runs, declared changes must match
 the actual metadata differences. A missing baseline cannot be independently
-checked. Rendering tables and Pareto plots is Phase 2 work.
+checked. Phase 2 `render_reports` adds Markdown/CSV tables and Pareto plots, and
+`load_stored_comparison` checks all referenced peers are complete. Reports are
+prepared before writing and stored before the completion marker.

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from edge_ai.records.schema import RunRecord
-from edge_ai.utils.serialization import to_dict
+from edge_ai.utils.serialization import safe_name, to_dict
 
 
 def _settings(record: RunRecord) -> dict[str, Any]:
@@ -16,25 +17,53 @@ def _settings(record: RunRecord) -> dict[str, Any]:
         "clocks": record.device.clocks,
         "batch_size": record.config.workload.batch_size,
         "runtime": record.config.model.runtime,
+        "manifest": record.config.workload.manifest_sha256,
+        "preprocessing": to_dict(record.config.workload.preprocessing),
+        "execution": to_dict(record.config.execution),
+        "quality_metric": record.quality_metric,
+        "workload": {
+            "task": record.config.workload.task,
+            "source": record.config.workload.source,
+            "source_id": record.config.workload.source_id,
+            "split": record.config.workload.split,
+            "subset": record.config.workload.subset,
+        },
     }
 
 
-def _baseline_changes(baseline: RunRecord, record: RunRecord) -> set[str]:
+def baseline_changes(baseline: RunRecord, record: RunRecord) -> set[str]:
     old, new = to_dict(baseline.config.model), to_dict(record.config.model)
     changes = set()
-    if old.pop("compression") != new.pop("compression"):
+    old_compression, new_compression = old.pop("compression"), new.pop("compression")
+    # Nominal counts describe the model, not an applied compression transformation.
+    for key in (
+        "parameters",
+        "flops",
+        "counting_method",
+        "counting_input_shape",
+        "counting_exclusions",
+    ):
+        old_compression.pop(key)
+        new_compression.pop(key)
+    if old_compression != new_compression:
         changes.add("compression")
     if old.pop("runtime") != new.pop("runtime"):
         changes.add("runtime")
     if old != new:
         changes.add("model")
-    if baseline.device != record.device or baseline.config.device != record.config.device:
+    if (
+        baseline.device != record.device
+        or baseline.config.device != record.config.device
+        or baseline.config.execution != record.config.execution
+    ):
         changes.add("device_settings")
     return changes
 
 
 def comparison_rows(
-    records: list[RunRecord], *, allow_mismatch: bool = False,
+    records: list[RunRecord],
+    *,
+    allow_mismatch: bool = False,
 ) -> list[dict[str, Any]]:
     """Return descriptors and print differing settings for explicit overrides.
 
@@ -48,9 +77,9 @@ def comparison_rows(
     if len({record.run_id for record in records}) != len(records):
         raise ValueError("comparison contains duplicate run ids")
     settings = [_settings(record) for record in records]
-    differing = [key for key in settings[0] if any(
-        item[key] != settings[0][key] for item in settings[1:]
-    )]
+    differing = [
+        key for key in settings[0] if any(item[key] != settings[0][key] for item in settings[1:])
+    ]
     if differing and not allow_mismatch:
         raise ValueError(f"incomparable settings: {', '.join(differing)}")
     mismatch = {
@@ -58,13 +87,15 @@ def comparison_rows(
         for key in differing
     }
     if mismatch:
-        print("Comparison settings mismatch (allow_mismatch=True): "
-              + json.dumps(to_dict(mismatch), sort_keys=True))
+        print(
+            "Comparison settings mismatch (allow_mismatch=True): "
+            + json.dumps(to_dict(mismatch), sort_keys=True)
+        )
     by_id = {record.run_id: record for record in records}
     rows = []
     for record in records:
         if record.config.baseline_id in by_id:
-            actual = _baseline_changes(by_id[record.config.baseline_id], record)
+            actual = baseline_changes(by_id[record.config.baseline_id], record)
             if set(record.config.changed_components) != actual:
                 raise ValueError(f"changed_components do not match baseline differences: {actual}")
         compression = record.config.model.compression
@@ -74,25 +105,68 @@ def comparison_rows(
         if energy is not None:
             total = energy.energy_j if energy.energy_j is not None else energy.energy_estimate_j
             average_power = total / (energy.window_end_s - energy.window_start_s)
-        rows.append({
-            "run_id": record.run_id, "variant": record.config.model.id,
-            "quality_metric": record.quality_metric, "quality": record.quality,
-            "parameters": compression.parameters, "flops": compression.flops,
-            "counting_method": compression.counting_method,
-            "counting_input_shape": compression.counting_input_shape,
-            "latency": latency, "memory": to_dict(record.memory),
-            "power_w": average_power,
-            "power_measured": record.power_trace.metadata.measured if record.power_trace else None,
-            "energy_j": energy.energy_j if energy else None,
-            "energy_estimate_j": energy.energy_estimate_j if energy else None,
-            "energy_method": (
-                (energy.integration_method or energy.estimate_method) if energy else None
-            ),
-            "sparsity_pattern": compression.sparsity_pattern,
-            "kernel_support": compression.kernel_support,
-            "sparsity_label": compression.sparsity_label(),
-            "baseline_id": record.config.baseline_id,
-            "changed_components": record.config.changed_components,
-            "settings_mismatch": to_dict(mismatch),
-        })
+        rows.append(
+            {
+                "run_id": record.run_id,
+                "variant": record.config.model.id,
+                "quality_metric": record.quality_metric,
+                "quality": record.quality,
+                "parameters": compression.parameters,
+                "flops": compression.flops,
+                "counting_method": compression.counting_method,
+                "counting_input_shape": compression.counting_input_shape,
+                "counting_exclusions": compression.counting_exclusions,
+                "latency": latency,
+                "memory": to_dict(record.memory),
+                "power_w": average_power,
+                "power_measured": record.power_trace.metadata.measured
+                if record.power_trace
+                else None,
+                "energy_j": energy.energy_j if energy else None,
+                "energy_estimate_j": energy.energy_estimate_j if energy else None,
+                "per_inference_j": energy.per_inference_j if energy else None,
+                "per_inference_estimate_j": energy.per_inference_estimate_j if energy else None,
+                "above_idle_j": (
+                    energy.energy_j
+                    - energy.idle_power_w * (energy.window_end_s - energy.window_start_s)
+                    if energy and energy.energy_j is not None and energy.idle_power_w is not None
+                    else None
+                ),
+                "above_idle_estimate_j": (
+                    energy.energy_estimate_j
+                    - energy.idle_power_w * (energy.window_end_s - energy.window_start_s)
+                    if energy
+                    and energy.energy_estimate_j is not None
+                    and energy.idle_power_w is not None
+                    else None
+                ),
+                "energy_method": (
+                    (energy.integration_method or energy.estimate_method) if energy else None
+                ),
+                "sparsity_pattern": compression.sparsity_pattern,
+                "kernel_support": compression.kernel_support,
+                "sparsity_label": compression.sparsity_label(),
+                "baseline_id": record.config.baseline_id,
+                "changed_components": record.config.changed_components,
+                "settings_mismatch": to_dict(mismatch),
+            }
+        )
     return rows
+
+
+def load_stored_comparison(
+    store, run: Path, *, allow_mismatch: bool = False
+) -> list[dict[str, Any]]:
+    """Refuse partially stored groups even when one individual record completed."""
+    record = store.read(run)
+    data = json.loads((run / "comparison.json").read_text(encoding="utf-8"))
+    identifiers = data.get("run_ids")
+    if not isinstance(identifiers, list) or not identifiers or record.run_id not in identifiers:
+        raise ValueError("comparison must reference its own run and peer identities")
+    for identifier in identifiers:
+        safe_name(identifier, "comparison run id")
+    try:
+        records = [store.read(run.parent / identifier) for identifier in identifiers]
+    except (FileNotFoundError, ValueError) as exc:
+        raise ValueError("comparison group is not completely stored") from exc
+    return comparison_rows(records, allow_mismatch=allow_mismatch)

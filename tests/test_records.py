@@ -78,7 +78,8 @@ def test_timing_summary_uses_measurement_samples_and_labels(record):
     assert summary["median_s"] == pytest.approx(0.02)
     assert summary["p95_s"] == pytest.approx(0.029)
     assert summary["p99_s"] == pytest.approx(0.0298)
-    assert summary["items_per_s"] == pytest.approx(3 / 0.23)
+    assert summary["items_per_s"] == pytest.approx(3 / 0.06)
+    assert summary["window_items_per_s"] == pytest.approx(3 / 0.23)
     assert not summary["measured"] and summary["scope"] == "model"
 
 

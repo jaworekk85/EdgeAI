@@ -10,6 +10,7 @@ from typing import Any, Literal
 from edge_ai.datasets.workload import Workload
 from edge_ai.models.variant import ModelVariant
 from edge_ai.profiling.protocol import ProfilingProtocol
+from edge_ai.utils.artifacts import ArtifactIdentity
 from edge_ai.utils.serialization import from_dict, positive, safe_name, to_dict, validate_types
 
 
@@ -25,6 +26,36 @@ class DeviceSettings:
 
 
 @dataclass(frozen=True)
+class ExecutionSettings:
+    intra_op_threads: int = 1
+    inter_op_threads: int = 1
+    provider: Literal["CPUExecutionProvider"] = "CPUExecutionProvider"
+    ort_execution: Literal["sequential"] = "sequential"
+    memory_interval_s: float = 0.01
+
+    def __post_init__(self) -> None:
+        validate_types(self)
+        for name in ("intra_op_threads", "inter_op_threads", "memory_interval_s"):
+            positive(getattr(self, name), name)
+
+
+@dataclass(frozen=True)
+class PowerSettings:
+    source: Literal["constant_mock"] = "constant_mock"
+    assumed_watts: float = 5.0
+    assumed_idle_watts: float = 1.0
+    sampling_hz: float = 100.0
+    idle_duration_s: float = 0.02
+
+    def __post_init__(self) -> None:
+        validate_types(self)
+        for name in ("assumed_watts", "assumed_idle_watts"):
+            positive(getattr(self, name), name, zero=True)
+        positive(self.sampling_hz, "sampling_hz")
+        positive(self.idle_duration_s, "idle_duration_s")
+
+
+@dataclass(frozen=True)
 class ExperimentConfig:
     experiment: str
     seed: int
@@ -36,6 +67,9 @@ class ExperimentConfig:
     changed_components: tuple[
         Literal["model", "compression", "runtime", "device_settings"], ...
     ] = ()
+    artifact: ArtifactIdentity | None = None
+    execution: ExecutionSettings | None = None
+    power: PowerSettings | None = None
 
     def __post_init__(self) -> None:
         validate_types(self)
@@ -51,6 +85,12 @@ class ExperimentConfig:
             raise ValueError("changed_components require a baseline_id")
         if self.baseline_id is not None:
             safe_name(self.baseline_id, "baseline_id")
+        if self.artifact is not None:
+            if self.artifact.checkpoint_sha256 != self.model.weights_digest:
+                raise ValueError("deployment artifact and canonical weights identity differ")
+            expected_role = {"pytorch": "checkpoint", "onnxruntime": "onnx"}.get(self.model.runtime)
+            if expected_role is not None and self.artifact.role != expected_role:
+                raise ValueError("artifact role differs from selected runtime")
 
 
 def _merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
@@ -63,22 +103,9 @@ def _merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def load_config(
-    path: Path, *, workspace: Path, overrides: dict[str, Any] | None = None,
-) -> ExperimentConfig:
-    """References are workspace-relative YAML paths in known typed positions.
-
-    Read public fragments from configs/ and private fragments from private/.
-    Preserve the complete resolved config through ``to_dict(config)``.
-    """
+def read_yaml(path: Path) -> dict[str, Any]:
+    """Read a safe mapping with unique string keys."""
     import yaml
-
-    workspace = workspace.resolve(strict=True)
-    public_root = (workspace / "configs").resolve()
-    private_root = (workspace / "private").resolve()
-    if not public_root.is_relative_to(workspace) or not private_root.is_relative_to(workspace):
-        raise ValueError("config roots must remain within the workspace")
-    used_private = False
 
     class UniqueKeyLoader(yaml.SafeLoader):
         pass
@@ -93,6 +120,30 @@ def load_config(
         return result
 
     UniqueKeyLoader.add_constructor("tag:yaml.org,2002:map", mapping)
+    with path.open(encoding="utf-8") as stream:
+        data = yaml.load(stream, Loader=UniqueKeyLoader)
+    if not isinstance(data, dict):
+        raise ValueError("config fragment must be a mapping")
+    return data
+
+
+def load_config(
+    path: Path,
+    *,
+    workspace: Path,
+    overrides: dict[str, Any] | None = None,
+) -> ExperimentConfig:
+    """References are workspace-relative YAML paths in known typed positions.
+
+    Read public fragments from configs/ and private fragments from private/.
+    Preserve the complete resolved config through ``to_dict(config)``.
+    """
+    workspace = workspace.resolve(strict=True)
+    public_root = (workspace / "configs").resolve()
+    private_root = (workspace / "private").resolve()
+    if not public_root.is_relative_to(workspace) or not private_root.is_relative_to(workspace):
+        raise ValueError("config roots must remain within the workspace")
+    used_private = False
 
     def read(reference: str | Path) -> dict[str, Any]:
         nonlocal used_private
@@ -104,11 +155,7 @@ def load_config(
         used_private |= is_private
         if candidate.suffix.lower() not in (".yaml", ".yml"):
             raise ValueError("config references must be YAML files")
-        with candidate.open(encoding="utf-8") as stream:
-            data = yaml.load(stream, Loader=UniqueKeyLoader)
-        if not isinstance(data, dict):
-            raise ValueError("config fragment must be a mapping")
-        return data
+        return read_yaml(candidate)
 
     data = read(path)
     for key in ("model", "workload", "device", "protocol"):

@@ -9,8 +9,12 @@ from edge_ai.utils.serialization import nonempty, positive, validate_types
 @dataclass(frozen=True)
 class CompressionSpec:
     method: Literal[
-        "none", "quantization", "structured_pruning", "unstructured_pruning",
-        "distillation", "smaller_architecture",
+        "none",
+        "quantization",
+        "structured_pruning",
+        "unstructured_pruning",
+        "distillation",
+        "smaller_architecture",
     ] = "none"
     precision: str = "fp32"
     calibration: str | None = None
@@ -22,6 +26,7 @@ class CompressionSpec:
     flops: float | None = None
     counting_method: str | None = None
     counting_input_shape: tuple[int, ...] | None = None
+    counting_exclusions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         validate_types(self)

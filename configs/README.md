@@ -1,4 +1,4 @@
-# Phase 1 configuration
+# Configuration
 
 The directories `devices`, `models`, `workloads`, `compression`, `conditions` and
 `experiments` contain or reserve typed YAML fragments. `experiments/core_mock.yaml`
@@ -17,3 +17,10 @@ observations are captured automatically; a device config describes requested
 settings and is not a handwritten `DeviceProfile`. Private configuration belongs
 only in the ignored private tree. Loading any private fragment or private local
 source requires `workload.privacy: private`.
+
+`experiments/reference_cpu.yaml` is a separate typed suite configuration loaded
+by `edge_ai.reference.load_reference_config`. It selects two model architectures,
+two runtimes, the public manifest selection and CPU/profiling/power settings.
+`prepare` resolves assets; `run` expands the suite to four fully resolved
+`ExperimentConfig` records. See `docs/cpu_reference.md` for commands. Do not feed
+the suite config to the single-run `load_config` API.

@@ -5,6 +5,9 @@ authorized the review and Phase 1 implementation together. The development
 specification remains authoritative. The phase table distinguishes implemented
 core contracts from planned later backends and experiments.
 
+The [approved Phase 2 design](phase_2_plan.md) specifies the implemented CPU runtime
+and reference pipeline. See [CPU usage](cpu_reference.md) for tested commands.
+
 ## Module responsibilities and implementation phases
 
 | Module | Responsibility | First implementation |

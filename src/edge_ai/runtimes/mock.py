@@ -46,6 +46,13 @@ class MockRuntime:
         self._require_loaded()
         self._batch = self._validate_batch(batch)
 
+    def prepare_batch(self, batch: Any) -> tuple[float, ...]:
+        self._require_loaded()
+        return self._validate_batch(batch)
+
+    def synchronize(self) -> None:
+        self._require_loaded()
+
     def warmup(self, n: int) -> None:
         self._require_loaded()
         positive(n, "warmup iterations", zero=True)

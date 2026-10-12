@@ -32,9 +32,14 @@ class ResultStore:
         public = (self.workspace / "results").resolve()
         private = (self.workspace / "private").resolve()
         private_results = (self.workspace / "private" / "results").resolve()
-        if not all(path.is_relative_to(self.workspace) for path in (
-            public, private, private_results,
-        )):
+        if not all(
+            path.is_relative_to(self.workspace)
+            for path in (
+                public,
+                private,
+                private_results,
+            )
+        ):
             raise ValueError("result root escapes workspace")
         if public.is_relative_to(private) or private.is_relative_to(public):
             raise ValueError("public and private result trees must not overlap")
@@ -42,15 +47,37 @@ class ResultStore:
             raise ValueError("private result root escapes private/")
         return private_results if privacy == "private" else public
 
-    def write(self, record: RunRecord) -> Path:
+    def write(self, record: RunRecord, *, reports: dict[str, bytes] | None = None) -> Path:
         import yaml
 
         record.validate()
+        reports = reports or {}
+        allowed_reports = {
+            "report.md",
+            "report.csv",
+            "comparison.json",
+            "plots/quality_vs_latency.png",
+            "plots/quality_vs_energy.png",
+        }
+        if set(reports) - allowed_reports or any(
+            type(value) is not bytes for value in reports.values()
+        ):
+            raise ValueError("unsupported report artifact name or content")
+        if sum(len(value) for value in reports.values()) > 50 * 1024 * 1024:
+            raise ValueError("report artifacts exceed size limit")
+        if record.schema_version == 2 and set(reports) != allowed_reports:
+            raise ValueError("schema version 2 requires complete reports before storage")
         safe_name(record.config.experiment, "experiment")
         root = self._root(record.config.workload.privacy)
         private_root = (self.workspace / "private").resolve()
-        source = (self.workspace / record.config.workload.source_id).resolve()
-        if source.is_relative_to(private_root) and record.config.workload.privacy != "private":
+        sources = [record.config.workload.source_id]
+        if record.config.artifact is not None:
+            sources.append(record.config.artifact.path)
+        if record.dataset_manifest is not None:
+            sources.extend(item["path"] for item in record.dataset_manifest["samples"])
+        if record.config.workload.privacy != "private" and any(
+            (self.workspace / source).resolve().is_relative_to(private_root) for source in sources
+        ):
             raise ValueError("private source cannot be written to public results")
         parent = root / record.config.experiment
         parent.mkdir(parents=True, exist_ok=True)
@@ -58,7 +85,10 @@ class ResultStore:
             raise ValueError("experiment directory escapes the result root")
         run = parent / record.run_id
         run.mkdir(exist_ok=False)
-        _json(run / "incomplete.json", {"status": "incomplete", "schema_version": 1})
+        _json(
+            run / "incomplete.json",
+            {"status": "incomplete", "schema_version": record.schema_version},
+        )
         # Keep the reservation and incomplete marker on failure; never retry into it.
         (run / "traces").mkdir()
         (run / "plots").mkdir()
@@ -70,8 +100,17 @@ class ResultStore:
             _json(run / "traces" / "end_to_end_timings.json", record.end_to_end_timings)
         if record.power_trace is not None:
             _json(run / "traces" / "power.json", record.power_trace)
+        if record.idle_power_trace is not None:
+            _json(run / "traces" / "idle_power.json", record.idle_power_trace)
+        if record.memory.rss_bytes:
+            _json(run / "traces" / "memory.json", record.memory)
         _json(run / "metrics.json", record)
-        _json(run / "complete.json", {"status": "complete", "schema_version": 1})
+        for relative, content in reports.items():
+            with (run / relative).open("xb") as stream:
+                stream.write(content)
+        _json(
+            run / "complete.json", {"status": "complete", "schema_version": record.schema_version}
+        )
         # Both markers remain: complete.json supersedes the reservation marker.
         return run
 
@@ -84,10 +123,17 @@ class ResultStore:
             raise ValueError("incomplete run cannot be read as a completed result")
         with (run / "complete.json").open(encoding="utf-8") as stream:
             marker = json.load(stream)
-        if marker != {"status": "complete", "schema_version": 1}:
+        if (
+            not isinstance(marker, dict)
+            or type(marker.get("schema_version")) is not int
+            or marker
+            not in [{"status": "complete", "schema_version": version} for version in (1, 2)]
+        ):
             raise ValueError("invalid completion marker")
         with (run / "metrics.json").open(encoding="utf-8") as stream:
             record = from_dict(RunRecord, json.load(stream))
+        if marker["schema_version"] != record.schema_version:
+            raise ValueError("completion marker version differs from record")
         if run.name != record.run_id or run.parent.name != record.config.experiment:
             raise ValueError("record identity differs from its directory")
         expected = self._root(record.config.workload.privacy)

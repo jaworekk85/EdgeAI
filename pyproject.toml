@@ -12,6 +12,9 @@ dependencies = ["PyYAML>=6,<7"]
 
 [project.optional-dependencies]
 dev = ["build>=1", "pytest>=8", "ruff>=0.6"]
+cpu = ["torch==2.9.1", "torchvision==0.24.1", "numpy==2.2.6", "Pillow==11.3.0"]
+onnx = ["onnx==1.19.1", "onnxscript==0.5.7", "onnx_ir==0.1.12", "onnxruntime==1.23.2"]
+reporting = ["psutil==7.2.2", "matplotlib==3.10.9"]
 
 [project.urls]
 Repository = "https://github.com/jaworekk85/EdgeAI"
@@ -23,6 +26,7 @@ where = ["src"]
 testpaths = ["tests"]
 markers = [
   "jetson: requires supported Jetson hardware and software; skip on other hosts",
+  "reference: opt-in prepared public pretrained CPU smoke; no downloads during tests",
 ]
 
 [tool.ruff]

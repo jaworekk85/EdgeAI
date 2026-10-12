@@ -1,5 +1,125 @@
 # Status
 
+## 2026-10-12 — Phase 2
+
+**State: approved CPU/reference plan implemented and verified; ready for user
+review before Phase 3.**
+
+### Authorization and scope
+
+- The user explicitly approved `docs/phase_2_plan.md` and requested continuation.
+- Implemented CPU runtimes, profiling, reporting and the reference pipeline only.
+  Hardware support, compression transforms, controllers and condition experiments
+  remain in their later phases; the authoritative specification is unchanged.
+
+### Done
+
+- Added lazy PyTorch/ONNX Runtime CPU adapters with native input preparation,
+  explicit thread/provider settings, warm-up, synchronization contract and release.
+- Added offline verified model loading, exclusive ONNX export, export identities,
+  shared partial Conv2d/Linear FLOP accounting and full parameter counts.
+- Added typed reference config, deterministic stratified Imagenette selection,
+  checked ImageNet-1K labels, shared Pillow/NumPy preprocessing and image hashes.
+- Added separate bounded/checksummed public preparation and no-download benchmark
+  commands; matching caches are verified and failed preparations never overwritten.
+- Added serial model/end-to-end timing, correct scoped throughput, sampled native
+  process RSS, observed-window synthetic active/idle power and energy estimates.
+- Added schema version 2 for execution/data/artifact/RSS/idle provenance while
+  preserving reading of version 1 files without rewriting them.
+- Added concise Markdown/full CSV tables and headless Pareto plots, visible
+  mismatch overrides, semantic model/runtime baseline attribution, private-path
+  checks and comparison-group completeness validation.
+- Reports are prepared before exclusive result storage and written before the
+  completion marker; no completed run directory is extended or overwritten.
+- Added offline adapter, profiler/cleanup, manifest/extraction, report/privacy,
+  compatibility and opt-in full public smoke tests; documented usage and versions.
+
+### Verification
+
+- Full CPU suite with prepared public smoke: **112 passed, 2 skipped** (Windows
+  denied directory symlink creation). No hardware was required.
+- Core-only emulation blocking optional inference/export/image/memory/plot imports:
+  **99 passed, 15 skipped** (optional CPU fixtures, opt-in smoke and symlink tests).
+- The first four-worker public CLI completed in **16.795 seconds**, including
+  startup, loading, preprocessing, warm-up, inference, reporting and storage.
+  The opt-in test independently passed the approximately two-minute budget and
+  validated all four complete records/groups.
+- Both exported models passed full-logit checks and identical top-1 predictions
+  on all 20 selected images. Recorded tolerance: rtol=1e-4, atol=5e-5; actual max
+  absolute errors: Small 4.63e-5, Large 1.83e-5. The initial atol=1e-5 rejected
+  one near-zero difference of 1.78e-5; the change is explicit in export metadata.
+- Verified pinned PyTorch 2.9.1+cpu/Torchvision 0.24.1+cpu and ONNX exporter stack
+  on Python 3.10.11 Windows; ONNX IR 1.0 incompatibility resolved with 0.1.12.
+- Ruff, dependency checks, editable package installation, local documentation
+  links and Git whitespace checks passed. Visually inspected a generated plot.
+- Assets and generated immutable runs remain ignored; none will be committed.
+  Validation runs captured Git dirty=True honestly while implementation was pending.
+
+### Known limitations
+
+- Real reference adapters currently cover FP32 MobileNetV3 classification, batch 1,
+  a small Imagenette validation subset and CPU execution. No Jetson/thermal/sustained
+  run, quantization, pruning, controller or perturbation implementation yet.
+- Synthetic watts/energy validate plumbing only; no measured energy or savings.
+  Download/export setup is outside the prepared benchmark's two-minute budget.
+- FLOPs are partial Conv2d/Linear accounting with explicit exclusions; RSS is a
+  sampled process peak including libraries/runtime and may miss transient peaks.
+- Storage is immutable through the API, not filesystem write protection. Private
+  remote-source classification remains the caller's responsibility.
+- The exact tested CPU dependency stack is pinned; other OS/Python combinations
+  are not claimed verified. Version remains unreleased development `0.0.0`.
+
+### Open questions / next phase
+
+- Review Phase 2 before authorizing Phase 3.
+- Choose a repository distribution license; no asset redistribution is implied.
+- Capture the Jetson's installed JetPack/L4T stack before hardware compatibility
+  decisions, then propose Phase 3 device/power/thermal/TensorRT architecture.
+
+## 2026-10-11 — Phase 2 planning
+
+**State: Phase 1 accepted for the next planning step; Phase 2 proposal prepared
+for review. Implementation has not started.**
+
+### Done
+
+- The user agreed to the proposed next step: prepare a Phase 2 plan before
+  implementation. Re-read the specification, status, architecture and core APIs.
+- Confirmed Phase 1 commit `a68189e` is on `main`/`origin/main`, with a clean
+  working tree before preparing this proposal.
+- Wrote `docs/phase_2_plan.md`: CPU runtime/export contracts, timing and RSS
+  boundaries, provenance/schema evolution, immutable reporting and validation gates.
+- Proposed MobileNetV3 Small/Large FP32 V1 weights with a seeded 20-image
+  Imagenette validation subset and both PyTorch/ONNX Runtime CPU backends.
+- Checked current primary documentation for weight preprocessing, dataset mapping,
+  ONNX export and ORT CPU/session settings. Kept exact dependency pins pending
+  compatibility checks during implementation.
+- Identified two integration requirements: power estimates must cover the observed
+  run window, and report files must be written before completion to preserve
+  immutable results. Recorded solutions in the proposal.
+
+### Verification
+
+- Inspected implemented Phase 1 contracts against the proposed extension points.
+- Confirmed local Python 3.10.11 and absence of all optional Phase 2 libraries.
+- Checked documentation links and Git whitespace for the documentation change.
+- No runtime code/config/test changes, dependency installations, asset downloads
+  or benchmark executions in this planning session.
+
+### Open questions / review
+
+- Review the proposed model/data choice, timing boundaries, schema version 2 and
+  prepared-asset smoke definition before implementation.
+- Exact compatible Python 3.10 Windows CPU dependency versions remain to verify.
+- The approximately two-minute smoke target is an acceptance requirement, not
+  verified performance; first downloads/export are separate setup work.
+- Repository distribution license and future JetPack/L4T observations remain open.
+
+### Next step
+
+Implement the reviewed Phase 2 proposal, run both offline CPU tests and the actual
+prepared public reference smoke, then stop before Phase 3.
+
 ## 2026-10-11 — Phase 1
 
 **State: architecture reviewed and core implemented; awaiting user review before
