@@ -4,10 +4,11 @@ Research framework for measuring resource-efficient AI on embedded hardware.
 First target: NVIDIA Jetson Orin Nano Super, with a hardware-independent core
 and CPU/mock paths for development on a laptop.
 
-**Current stage: Phase 2 — CPU reference pipeline implemented; ready for review.**
+**Current stage: Phase 3A — implemented and verified; ready for review.**
 PyTorch and ONNX Runtime CPU inference, timing, sampled process memory, quality
 evaluation and immutable reports are implemented alongside the Phase 1 core.
-Jetson support starts in Phase 3 after review.
+Sustained CPU runs and offline telemetry parsing/replay prepare for Phase 3B.
+Jetson execution and real power/thermal measurement await the physical device.
 
 ## Start here
 
@@ -17,6 +18,8 @@ Jetson support starts in Phase 3 after review.
 - [Core API usage](docs/core_usage.md): configuration, mocks and result contracts.
 - [Approved Phase 2 design](docs/phase_2_plan.md).
 - [CPU reference usage](docs/cpu_reference.md): tested dependencies, preparation and benchmark commands.
+- [Phase 3A design](docs/phase_3a_plan.md) and [usage](docs/phase_3a_usage.md).
+- [CPU/hardware roadmap](docs/cpu_hardware_roadmap.md): phases 4–6 can develop before 3B.
 - [Profiling protocol](docs/profiling_protocol.md).
 - [Hardware setup plan](docs/hardware_setup.md).
 - [Scope and boundaries](docs/scope_and_boundaries.md).
@@ -71,7 +74,8 @@ invariants and phase plan.
 
 ## Development
 
-Phase 2 follows the approved plan. Review this phase before Phase 3 implementation.
+Phase 3A follows the approved preparation scope. Stop for review before Phase 4.
+Phase 3B remains pending and does not block separately reviewed CPU portions of 4–6.
 Read the specification before substantial changes and update
 `STATUS.md` after each work session.
 

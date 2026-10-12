@@ -7,6 +7,9 @@ core contracts from planned later backends and experiments.
 
 The [approved Phase 2 design](phase_2_plan.md) specifies the implemented CPU runtime
 and reference pipeline. See [CPU usage](cpu_reference.md) for tested commands.
+The [Phase 3A design](phase_3a_plan.md) adds sustained CPU profiling and offline
+telemetry preparation. The [CPU/hardware roadmap](cpu_hardware_roadmap.md) permits
+separately reviewed CPU portions of 4–6 while 3B device validation remains pending.
 
 ## Module responsibilities and implementation phases
 
@@ -14,11 +17,11 @@ and reference pipeline. See [CPU usage](cpu_reference.md) for tested commands.
 | --- | --- | --- |
 | `models` | Serializable `ModelVariant`; model families and weights identity | 1 (metadata), 2 (model loading) |
 | `compression` | `CompressionSpec`, shared parameter/FLOP accounting; transformations | 1 (metadata), 4 (tooling) |
-| `export` | Explicit ONNX / optional TensorRT artifact export | 2 / 3 |
-| `runtimes` | `RuntimeBackend` contract, mock, PyTorch, ONNX Runtime, TensorRT | 1 / 2 / 3 |
-| `profiling` | Warm-up, synchronized timing, memory, steady-state/sustained runs | 2 / 3 |
-| `power` | `PowerSource`, `PowerTrace`, mock, integration, device-specific sources | 1 / 3 |
-| `devices` | Automatic host/device profile capture; Jetson-specific capture submodule | 1 / 3 |
+| `export` | Explicit ONNX / optional TensorRT artifact export | 2 / 3B |
+| `runtimes` | `RuntimeBackend` contract, mock, PyTorch, ONNX Runtime, TensorRT | 1 / 2 / 3B |
+| `profiling` | Warm-up, synchronized timing, memory, steady-state/sustained runs | 2 / 3A CPU / 3B device |
+| `power` | `PowerSource`, `PowerTrace`, mock, integration, replay, device-specific sources | 1 / 3A replay / 3B live |
+| `devices` | Automatic CPU profile, offline telemetry parsing, Jetson profile capture | 1 / 3A parser / 3B profile |
 | `datasets` | `Workload` metadata, repeatable input sources and dataset subsets | 1 / 2 |
 | `conditions` | `Condition` descriptions, seeded transforms and streaming schedules | 1 (metadata), 6 (transforms) |
 | `controllers` | Selection/update contract, baselines and switching-cost accounting | 5 |

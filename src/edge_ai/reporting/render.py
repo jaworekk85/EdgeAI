@@ -59,6 +59,12 @@ def render_reports(records: list[RunRecord], *, allow_mismatch: bool = False) ->
         "kernel_support",
         "sparsity_label",
         "settings_mismatch",
+        "sustained_target_s",
+        "sustained_actual_s",
+        "sustained_stop_reason",
+        "inference_count",
+        "completed_passes",
+        "end_to_end_latency_change_fraction",
     ]
     flat_rows = []
     for record, row in zip(records, rows):
@@ -74,6 +80,16 @@ def render_reports(records: list[RunRecord], *, allow_mismatch: bool = False) ->
                 "settings_mismatch": mismatch_text,
             }
         )
+        flat.update({
+            "sustained_target_s": record.sustained.target_duration_s if record.sustained else None,
+            "sustained_actual_s": record.sustained.actual_duration_s if record.sustained else None,
+            "sustained_stop_reason": record.sustained.stop_reason if record.sustained else None,
+            "inference_count": len(record.timings.durations_s),
+            "completed_passes": record.sustained.completed_passes if record.sustained else None,
+            "end_to_end_latency_change_fraction": (
+                record.sustained.latency_change_fraction if record.sustained else None
+            ),
+        })
         flat_rows.append(flat)
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=columns)
@@ -137,6 +153,32 @@ def render_reports(records: list[RunRecord], *, allow_mismatch: bool = False) ->
             f"{row['counting_exclusions']}. Memory: {row['memory_method']}. "
             f"Energy method: {row['energy_method']}."
         )
+    if any(record.sustained is not None for record in records):
+        markdown.extend([
+            "", "## Sustained CPU profiling", "",
+            "Quality repeats the same verified subset; repeated inputs are not independent data.",
+            "Latency change describes end-to-end CPU timings; thermal cause is unknown.", "",
+        ])
+        for record in records:
+            summary = record.sustained
+            if summary is None:
+                continue
+            markdown.extend([
+                f"- {record.config.model.id}: target {summary.target_duration_s:g} s; "
+                f"actual {summary.actual_duration_s:.4g} s; {summary.inference_count} inferences "
+                f"in {summary.completed_passes} complete passes; stop: {summary.stop_reason}; "
+                f"first-to-last end-to-end mean change {summary.latency_change_fraction:+.2%}.",
+                "",
+                "| Window offset (s) | Inferences | End-to-end mean / p95 (ms) |",
+                "| --- | --- | --- |",
+            ])
+            for window in summary.windows:
+                markdown.append(
+                    f"| {window.start_offset_s:.4g}–{window.end_offset_s:.4g} | "
+                    f"{window.inference_count} | {window.mean_s * 1000:.4g} / "
+                    f"{window.p95_s * 1000:.4g} |"
+                )
+            markdown.append("")
     reports = {
         "report.csv": output.getvalue().encode(),
         "report.md": ("\n".join(markdown) + "\n").encode(),

@@ -65,8 +65,8 @@ class ResultStore:
             raise ValueError("unsupported report artifact name or content")
         if sum(len(value) for value in reports.values()) > 50 * 1024 * 1024:
             raise ValueError("report artifacts exceed size limit")
-        if record.schema_version == 2 and set(reports) != allowed_reports:
-            raise ValueError("schema version 2 requires complete reports before storage")
+        if record.schema_version in (2, 3) and set(reports) != allowed_reports:
+            raise ValueError("schema version 2/3 requires complete reports before storage")
         safe_name(record.config.experiment, "experiment")
         root = self._root(record.config.workload.privacy)
         private_root = (self.workspace / "private").resolve()
@@ -102,6 +102,8 @@ class ResultStore:
             _json(run / "traces" / "power.json", record.power_trace)
         if record.idle_power_trace is not None:
             _json(run / "traces" / "idle_power.json", record.idle_power_trace)
+        if record.sustained is not None:
+            _json(run / "traces" / "sustained.json", record.sustained)
         if record.memory.rss_bytes:
             _json(run / "traces" / "memory.json", record.memory)
         _json(run / "metrics.json", record)
@@ -127,7 +129,7 @@ class ResultStore:
             not isinstance(marker, dict)
             or type(marker.get("schema_version")) is not int
             or marker
-            not in [{"status": "complete", "schema_version": version} for version in (1, 2)]
+            not in [{"status": "complete", "schema_version": version} for version in (1, 2, 3)]
         ):
             raise ValueError("invalid completion marker")
         with (run / "metrics.json").open(encoding="utf-8") as stream:

@@ -1,8 +1,9 @@
 # CPU/mock tests
 
 Run `python -m pytest -q` and `python -m ruff check src tests` from the repository
-after installing `.[dev]`. Tests need no Jetson, accelerator libraries, pretrained
-weights or datasets. All generated records use temporary directories.
+after installing `.[dev]`. Tests need no Jetson or accelerator libraries. Default
+tests use generated fixtures in temporary directories; the opt-in public smoke
+uses separately prepared pretrained assets and writes new ignored result directories.
 
 Coverage includes strict config/schema validation, energy provenance, analytic
 trace integration and bounded windows, concurrent directory reservation, failed
@@ -30,3 +31,9 @@ the approximately two-minute budget. It downloads nothing; without the option it
 skips explicitly. Real adapter fixtures skip when the optional CPU/export extras
 are absent. Phase 2 acceptance requires running both the offline suite and this
 prepared public smoke; a skip alone is not evidence of pipeline completion.
+
+Phase 3A extends the opt-in smoke with a two-second sustained matrix using the same
+assets and both CPU backends. It checks schema 3, actual counts, complete passes,
+stop reason, estimated energy and reports. Parser/replay fixtures are hand-written
+format examples, not hardware data. Fake-clock tests exercise duration/cap stops
+and cleanup; sustained record validation recomputes summaries from raw traces.

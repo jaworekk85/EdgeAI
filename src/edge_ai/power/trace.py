@@ -33,6 +33,10 @@ class PowerMetadata:
             positive(self.resolution_w, "resolution_w")
         if self.measured and self.clock != "monotonic":
             raise ValueError("measured samples require a monotonic measurement clock")
+        if self.measured and self.source in ("mock", "constant_mock", "tegrastats_replay"):
+            raise ValueError("synthetic and replay sources cannot declare measured power")
+        if self.source == "tegrastats_replay" and self.clock != "synthetic":
+            raise ValueError("offline replay requires a synthetic clock")
 
 
 @dataclass(frozen=True)

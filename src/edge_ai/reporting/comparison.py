@@ -21,6 +21,7 @@ def _settings(record: RunRecord) -> dict[str, Any]:
         "preprocessing": to_dict(record.config.workload.preprocessing),
         "execution": to_dict(record.config.execution),
         "quality_metric": record.quality_metric,
+        "profiling_protocol": to_dict(record.config.protocol),
         "workload": {
             "task": record.config.workload.task,
             "source": record.config.workload.source,
@@ -111,6 +112,7 @@ def comparison_rows(
                 "variant": record.config.model.id,
                 "quality_metric": record.quality_metric,
                 "quality": record.quality,
+                "sustained": to_dict(record.sustained),
                 "parameters": compression.parameters,
                 "flops": compression.flops,
                 "counting_method": compression.counting_method,

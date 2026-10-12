@@ -115,8 +115,11 @@ def test_profiler_excludes_warmup_and_keeps_scopes_and_energy_aligned(config):
 
 
 @pytest.mark.parametrize("failure", ["load", "infer", "sampler", "source", "score"])
-def test_profiler_cleans_up_after_failure(config, failure):
+@pytest.mark.parametrize("sustained", [False, True])
+def test_profiler_cleans_up_after_failure(config, failure, sustained):
     config = replace(config, execution=ExecutionSettings(), power=PowerSettings())
+    if sustained:
+        config = replace(config, protocol=replace(config.protocol, sustained_duration_s=1))
     clock, sampler = Clock(), FakeSampler("sampler" if failure == "sampler" else None)
     runtime = FakeRuntime(clock, failure)
 
@@ -155,3 +158,78 @@ def test_window_mock_short_window_and_lifecycle():
     assert not trace.metadata.measured and trace.metadata.clock == "monotonic"
     with pytest.raises(RuntimeError):
         source.stop()
+
+
+@pytest.mark.parametrize("target,cap,count,reason", [
+    (4, 100, 6, "duration_reached"),
+    (30, 5, 3, "inference_cap"),
+    (30, 6, 6, "inference_cap"),
+    (0.1, 3, 3, "duration_reached"),
+])
+def test_sustained_complete_passes_actual_counts_and_estimates(config, target, cap, count, reason):
+    from edge_ai.profiling.sustained import summarize_sustained
+
+    config = replace(
+        config, execution=ExecutionSettings(), power=PowerSettings(),
+        protocol=replace(
+            config.protocol, sustained_duration_s=target, sustained_max_iterations=cap,
+        ),
+    )
+    clock, sampler = Clock(), FakeSampler()
+    runtime = FakeRuntime(clock)
+    order, scoring_times = [], []
+
+    def source(index):
+        order.append(index)
+        clock.advance(0.3)
+        return [index], 0
+
+    def convert(output):
+        clock.advance(0.4)
+        return output
+
+    def score(output, label):
+        scoring_times.append(clock())
+        return output[0] == 0
+
+    result = profile_cpu(
+        runtime, config, source, clock=clock, pause=clock.advance, sampler=sampler,
+        materialize=convert, score=score,
+    )
+    assert runtime.warmups == 2 and runtime.inferences == count
+    assert order == [0] + [0, 1, 2] * (count // 3)
+    assert result.quality == pytest.approx(1 / 3)
+    assert len(scoring_times) == count and scoring_times[0] < scoring_times[-1]
+    assert result.sustained.completed_passes == count // 3
+    assert result.sustained.stop_reason == reason
+    assert result.sustained.actual_duration_s == pytest.approx(count)
+    assert result.sustained.latency_change_fraction == pytest.approx(0)
+    assert result.energy.inference_count == count and result.energy.energy_j is None
+    assert result.energy.energy_estimate_j == pytest.approx(5 * count)
+    assert result.energy.per_inference_estimate_j == pytest.approx(5)
+    assert all(time >= result.energy.window_start_s for time in scoring_times)
+    assert result.sustained == summarize_sustained(
+        config.protocol, result.end_to_end_timings,
+        result.energy.window_start_s, result.energy.window_end_s,
+    )
+    assert runtime.released and sampler.stopped
+
+
+def test_sustained_summary_refuses_early_stops_partial_passes_and_scope():
+    from edge_ai.profiling.protocol import ProfilingProtocol
+    from edge_ai.profiling.sustained import summarize_sustained
+    from edge_ai.records.schema import TimingTrace
+
+    protocol = ProfilingProtocol(0, 2, 1, 10, 10)
+    timings = TimingTrace((0, 1), (0.5, 0.5), 0, scope="end_to_end")
+    with pytest.raises(ValueError, match="before either"):
+        summarize_sustained(protocol, timings, 0, 2)
+    with pytest.raises(ValueError, match="complete passes"):
+        summarize_sustained(protocol, replace(timings, starts_s=(0,), durations_s=(0.5,)), 0, 2)
+    with pytest.raises(ValueError, match="end-to-end"):
+        summarize_sustained(protocol, replace(timings, scope="model"), 0, 2)
+    with pytest.raises(ValueError, match="after a completed pass"):
+        summarize_sustained(
+            replace(protocol, sustained_duration_s=1),
+            replace(timings, starts_s=(0, 1, 2, 3), durations_s=(0.5,) * 4), 0, 4,
+        )

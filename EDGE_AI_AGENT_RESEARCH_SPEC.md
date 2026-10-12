@@ -279,6 +279,16 @@ PyTorch and ONNX Runtime backends, timing, memory, reporting utilities. Referenc
 **Phase 3 — Jetson support.**
 Device profile capture, onboard power source, thermal traces, sustained-run mode, TensorRT backend, `scripts/on_device/`, `docs/hardware_setup.md`.
 
+Scheduling amendment approved by the user on 2026-10-12: split Phase 3 into
+**3A — hardware-independent preparation** (offline telemetry parsing/replay,
+sustained CPU profiling and hardware validation plan) and **3B — on-device
+implementation and validation** (automatic Jetson observations, live power/thermal
+capture, TensorRT and on-device commands). Stop for review after 3A. Phase 3B may
+remain pending while CPU/mock portions of Phases 4, 5 and 6 are developed and
+reviewed separately. Preserve each phase's pending hardware requirements; do not
+mark full Jetson support or hardware efficiency verified before 3B. CPU timings,
+synthetic conditions and replay estimates do not predict Jetson performance.
+
 **Phase 4 — compression tooling.**
 FP16/INT8 (and INT4 where the runtime supports it), structured and unstructured pruning including 2:4, compression metadata and kernel-support detection.
 

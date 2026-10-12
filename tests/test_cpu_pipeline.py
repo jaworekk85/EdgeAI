@@ -102,8 +102,13 @@ def assets(tmp_path_factory):
     return root, model, config, manifest, onnx, np
 
 
-def make_record(assets, backend):
+def make_record(assets, backend, *, sustained_duration_s=None, sustained_max_iterations=100000):
     root, model, config, manifest, onnx, _ = assets
+    if sustained_duration_s is not None:
+        config = replace(config, protocol=replace(
+            config.protocol, sustained_duration_s=sustained_duration_s,
+            sustained_max_iterations=sustained_max_iterations,
+        ))
     if backend == "pytorch":
         from edge_ai.runtimes.pytorch import PyTorchRuntime
 
@@ -129,9 +134,10 @@ def make_record(assets, backend):
         end_to_end_timings=result.end_to_end_timings,
         quality_metric="top1_accuracy",
         quality=result.quality,
-        schema_version=2,
+        schema_version=3 if result.sustained is not None else 2,
         idle_power_trace=result.idle_power_trace,
         dataset_manifest=to_dict(manifest),
+        sustained=result.sustained,
     )
     return record
 
@@ -151,6 +157,11 @@ def test_real_cpu_pipeline_records_reports_and_immutability(assets, backend):
     assert (run / "plots" / "quality_vs_energy.png").read_bytes().startswith(b"\x89PNG")
     assert b"synthetic" in (run / "report.md").read_bytes()
     assert (run / "traces" / "idle_power.json").exists()
+    # Actual Phase 2 records omit fields introduced in 3A; no stored file is migrated.
+    legacy = to_dict(record)
+    legacy.pop("sustained")
+    legacy["config"]["protocol"].pop("sustained_max_iterations")
+    assert from_dict(RunRecord, legacy) == record
     with pytest.raises(FileExistsError):
         store.write(record, reports=reports)
     with pytest.raises(ValueError, match="complete reports"):
@@ -163,6 +174,43 @@ def test_partial_nominal_counter_uses_declared_convention(assets):
     assert compression.flops == 128 * 7 + 1000 * 5
     assert compression.parameters == 8 + 3000
     assert "pooling" in compression.counting_exclusions
+
+
+@pytest.mark.parametrize("backend", ["pytorch", "onnxruntime"])
+def test_sustained_record_store_reports_and_validation(assets, backend):
+    pytest.importorskip("matplotlib")
+    record = make_record(assets, backend, sustained_duration_s=10, sustained_max_iterations=6)
+    assert record.schema_version == 3 and record.sustained.stop_reason == "inference_cap"
+    assert len(record.timings.durations_s) == 6 and record.energy.inference_count == 6
+    assert from_dict(RunRecord, to_dict(record)) == record
+    store = ResultStore(assets[0])
+    reports = render_reports([record])
+    run = store.write(record, reports=reports)
+    assert store.read(run) == record
+    assert (run / "traces" / "sustained.json").is_file()
+    assert b"inference_cap" in reports["report.md"]
+    assert b"thermal cause is unknown" in reports["report.md"]
+    with pytest.raises(FileExistsError):
+        store.write(record, reports=reports)
+    with pytest.raises(ValueError, match="summary differs"):
+        replace(record, sustained=replace(record.sustained, stop_reason="duration_reached"))
+    with pytest.raises(ValueError, match="schema version 3"):
+        replace(record, schema_version=2)
+    with pytest.raises(ValueError, match="timing count"):
+        replace(record, timings=replace(
+            record.timings, starts_s=record.timings.starts_s[:3],
+            durations_s=record.timings.durations_s[:3],
+        ))
+    with pytest.raises(ValueError, match="inference count"):
+        replace(record, energy=replace(
+            record.energy, inference_count=3,
+            per_inference_estimate_j=record.energy.energy_estimate_j / 3,
+        ))
+    short = make_record(assets, backend)
+    with pytest.raises(ValueError, match="profiling_protocol"):
+        comparison_rows([short, record])
+    rows = comparison_rows([short, record], allow_mismatch=True)
+    assert "profiling_protocol" in rows[0]["settings_mismatch"]
 
 
 def test_onnx_backend_import_and_inference_without_torch(assets):

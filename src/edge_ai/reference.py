@@ -66,8 +66,6 @@ class ReferenceConfig:
             raise ValueError("iterations must cover the selected validation subset once")
         if self.device.adapter != "cpu" or self.device.requested_power_mode is not None:
             raise ValueError("Phase 2 reference requires the CPU adapter without hardware settings")
-        if self.protocol.sustained_duration_s is not None:
-            raise ValueError("sustained runs belong to Phase 3")
 
     def digest(self):
         return hashlib.sha256(json.dumps(to_dict(self), sort_keys=True).encode()).hexdigest()
@@ -201,7 +199,11 @@ def prepare_reference(config: ReferenceConfig, workspace: Path) -> Path:
 def load_prepared(path: Path, config: ReferenceConfig, workspace: Path) -> dict:
     file = workspace_file(workspace, path.relative_to(workspace).as_posix())
     data = json.loads(file.read_text(encoding="utf-8"))
-    if data["config_sha256"] != config.digest() or data["config"] != to_dict(config):
+    stored_digest = hashlib.sha256(json.dumps(data["config"], sort_keys=True).encode()).hexdigest()
+    if (
+        data["config_sha256"] != stored_digest
+        or from_dict(ReferenceConfig, data["config"]) != config
+    ):
         raise ValueError("prepared assets differ from reference configuration")
     manifest = from_dict(DatasetManifest, data["manifest"])
     from collections import Counter
@@ -249,7 +251,9 @@ def worker(config: ExperimentConfig, manifest: DatasetManifest, workspace: Path)
     if config.model.runtime == "pytorch":
         provenance.runtime_versions["pytorch"] = provenance.runtime_versions["torch"]
     device = capture_device_profile()
-    result = profile_cpu(runtime, config, lambda index: manifest.batch(workspace, index))
+    result = profile_cpu(
+        runtime, config, lambda index: manifest.batch(workspace, index % len(manifest.samples))
+    )
     return RunRecord(
         run_id=new_run_id(config),
         config=config,
@@ -264,16 +268,35 @@ def worker(config: ExperimentConfig, manifest: DatasetManifest, workspace: Path)
         energy=result.energy,
         quality=result.quality,
         quality_metric="top1_accuracy",
-        schema_version=2,
+        schema_version=3 if result.sustained is not None else 2,
         dataset_manifest=to_dict(manifest),
+        sustained=result.sustained,
     )
 
 
-def run_reference(config: ReferenceConfig, prepared: Path, workspace: Path) -> list[Path]:
+def run_reference(
+    config: ReferenceConfig, prepared: Path, workspace: Path,
+    *, sustained_duration_s: float | None = None, sustained_max_iterations: int | None = None,
+) -> list[Path]:
     import tempfile
 
     started = perf_counter()
     assets = load_prepared(prepared, config, workspace)
+    if sustained_duration_s is not None or sustained_max_iterations is not None:
+        protocol = replace(
+            config.protocol,
+            sustained_duration_s=(
+                sustained_duration_s if sustained_duration_s is not None
+                else config.protocol.sustained_duration_s
+            ),
+            sustained_max_iterations=(
+                sustained_max_iterations if sustained_max_iterations is not None
+                else config.protocol.sustained_max_iterations
+            ),
+        )
+        if protocol.sustained_duration_s is None:
+            raise ValueError("an inference cap override requires sustained mode")
+        config = replace(config, protocol=protocol)
     manifest = from_dict(DatasetManifest, assets["manifest"])
     groups = []
     baselines = {}
@@ -324,7 +347,7 @@ def run_reference(config: ReferenceConfig, prepared: Path, workspace: Path) -> l
                     ],
                     capture_output=True,
                     text=True,
-                    timeout=110,
+                    timeout=110 + (config.protocol.sustained_duration_s or 0),
                 )
                 if completed.returncode != 0:
                     raise RuntimeError(f"reference worker failed: {completed.stderr}")
@@ -365,7 +388,13 @@ def main():
     parser.add_argument("--prepared", type=Path)
     parser.add_argument("--request", type=Path)
     parser.add_argument("--response", type=Path)
+    parser.add_argument("--sustained-seconds", type=float)
+    parser.add_argument("--max-inferences", type=int)
     arguments = parser.parse_args()
+    if arguments.command != "run" and (
+        arguments.sustained_seconds is not None or arguments.max_inferences is not None
+    ):
+        parser.error("sustained overrides are supported only by run")
     workspace = arguments.workspace.resolve(strict=True)
     if arguments.command == "worker":
         data = json.loads(arguments.request.read_text(encoding="utf-8"))
@@ -387,7 +416,10 @@ def main():
             prepared = arguments.prepared
             if not prepared.is_absolute():
                 prepared = workspace / prepared
-            run_reference(config, prepared, workspace)
+            run_reference(
+                config, prepared, workspace, sustained_duration_s=arguments.sustained_seconds,
+                sustained_max_iterations=arguments.max_inferences,
+            )
 
 
 if __name__ == "__main__":

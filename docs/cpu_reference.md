@@ -122,4 +122,6 @@ caller's responsibility.
 
 All downloaded assets, prepared artifacts and runs stay local and are ignored by
 Git. Upstream attribution is preserved; weights/images are not redistributed.
-Phase 3 hardware work awaits review of Phase 2.
+Phase 3A adds [sustained CPU profiling and offline telemetry](phase_3a_usage.md).
+Jetson execution remains Phase 3B; [CPU portions of phases 4–6](cpu_hardware_roadmap.md)
+may proceed through their own reviews while device validation is pending.

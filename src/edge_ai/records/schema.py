@@ -10,6 +10,7 @@ from typing import Any, Literal
 from edge_ai.config import ExperimentConfig
 from edge_ai.devices.profile import DeviceProfile
 from edge_ai.power.trace import EnergyResult, PowerTrace, integrate_trace
+from edge_ai.profiling.sustained import SustainedSummary, summarize_sustained
 from edge_ai.runtimes.base import MemoryReport
 from edge_ai.utils.provenance import Provenance
 from edge_ai.utils.serialization import from_dict, positive, safe_name, to_dict, validate_types
@@ -81,18 +82,19 @@ class RunRecord:
     quality: float | None = None
     temperature_start_c: float | None = None
     temperature_end_c: float | None = None
-    schema_version: Literal[1, 2] = 1
+    schema_version: Literal[1, 2, 3] = 1
     idle_power_trace: PowerTrace | None = None
     dataset_manifest: dict[str, Any] | None = None
+    sustained: SustainedSummary | None = None
 
     def __post_init__(self) -> None:
         validate_types(self)
         safe_name(self.run_id, "run_id")
         positive(self.run_duration_s, "run_duration_s")
         config = self.config
-        if config.model.runtime in ("pytorch", "onnxruntime") and self.schema_version != 2:
-            raise ValueError("real CPU backends require schema version 2")
-        if self.schema_version == 2:
+        if config.model.runtime in ("pytorch", "onnxruntime") and self.schema_version not in (2, 3):
+            raise ValueError("real CPU backends require schema version 2 or 3")
+        if self.schema_version in (2, 3):
             if any(
                 item is None
                 for item in (
@@ -121,8 +123,8 @@ class RunRecord:
             ):
                 raise ValueError("dataset selection/preprocessing differs from config")
             validate_digest(config.model.weights_digest)
-            if config.protocol.sustained_duration_s is not None or config.workload.conditions:
-                raise ValueError("sustained runs and perturbations are outside Phase 2")
+            if config.workload.conditions:
+                raise ValueError("perturbations require a later phase")
             if not self.timings.measured or not self.end_to_end_timings.measured:
                 raise ValueError("real CPU runs require measured timing traces")
             if not self.memory.measured or not self.memory.rss_bytes:
@@ -135,6 +137,10 @@ class RunRecord:
                 raise ValueError("CPU reference requires top1_accuracy in [0, 1]")
             if self.idle_power_trace.metadata.measured != self.power_trace.metadata.measured:
                 raise ValueError("idle and active power provenance differ")
+            if any(trace.metadata.clock != "monotonic" for trace in (
+                self.idle_power_trace, self.power_trace,
+            )):
+                raise ValueError("CPU power windows must share the observed monotonic clock")
             idle = self.idle_power_trace
             idle_mean = integrate_trace(
                 idle, self.energy.rail, idle.timestamps_s[0], idle.timestamps_s[-1]
@@ -154,7 +160,24 @@ class RunRecord:
             raise ValueError("selected runtime version must be known")
         if self.timings.scope != "model":
             raise ValueError("primary timing trace must use model scope")
-        expected = config.protocol.iterations * config.protocol.repetitions
+        if config.protocol.sustained_duration_s is not None:
+            if self.schema_version != 3 or self.sustained is None:
+                raise ValueError("sustained runs require schema version 3 and a summary")
+            if self.energy is None or self.end_to_end_timings is None:
+                raise ValueError("sustained summary requires active window and end-to-end trace")
+            actual_summary = summarize_sustained(
+                config.protocol, self.end_to_end_timings,
+                self.energy.window_start_s, self.energy.window_end_s,
+            )
+            if self.sustained != actual_summary:
+                raise ValueError("sustained summary differs from raw timing/window provenance")
+            if self.sustained.actual_duration_s > self.run_duration_s + 1e-12:
+                raise ValueError("sustained active window exceeds declared run duration")
+            expected = self.sustained.inference_count
+        else:
+            if self.schema_version == 3 or self.sustained is not None:
+                raise ValueError("schema version 3 is reserved for sustained runs")
+            expected = config.protocol.iterations * config.protocol.repetitions
         for trace in (self.timings, self.end_to_end_timings):
             if trace is None:
                 continue

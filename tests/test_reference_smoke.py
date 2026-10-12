@@ -10,23 +10,27 @@ from edge_ai.reporting.comparison import load_stored_comparison
 
 
 @pytest.mark.reference
-def test_prepared_public_reference_full_cli_under_two_minutes(request):
+@pytest.mark.parametrize("sustained", [False, True])
+def test_prepared_public_reference_full_cli_under_two_minutes(request, sustained):
     prepared = request.config.getoption("--reference-prepared")
     if prepared is None:
         pytest.skip("opt in with --reference-prepared after separate asset preparation")
     workspace = Path(__file__).resolve().parents[1]
     started = perf_counter()
+    command = [
+        sys.executable,
+        "-m",
+        "edge_ai.reference",
+        "run",
+        "--workspace",
+        str(workspace),
+        "--prepared",
+        prepared,
+    ]
+    if sustained:
+        command.extend(["--sustained-seconds", "2", "--max-inferences", "2000"])
     completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "edge_ai.reference",
-            "run",
-            "--workspace",
-            str(workspace),
-            "--prepared",
-            prepared,
-        ],
+        command,
         capture_output=True,
         text=True,
         timeout=120,
@@ -49,9 +53,19 @@ def test_prepared_public_reference_full_cli_under_two_minutes(request):
         for backend in ("pytorch", "onnxruntime")
     }
     for path, record in zip(paths, records):
-        assert len(record.timings.durations_s) == 20
+        if sustained:
+            assert record.schema_version == 3
+            assert record.sustained.stop_reason == "duration_reached"
+            assert record.sustained.actual_duration_s >= 2
+            assert record.sustained.completed_passes * 20 == len(record.timings.durations_s)
+            assert record.energy.inference_count == len(record.timings.durations_s)
+            assert (path / "traces" / "sustained.json").exists()
+            assert b"Sustained CPU profiling" in (path / "report.md").read_bytes()
+        else:
+            assert record.schema_version == 2 and record.sustained is None
+            assert len(record.timings.durations_s) == 20
         assert record.timings.warmup_iterations_excluded == 5
         assert record.energy.energy_j is None and record.energy.energy_estimate_j is not None
         assert record.timings.measured and len(load_stored_comparison(store, path)) == 2
     assert elapsed < 120
-    print(f"Full public reference CLI: {elapsed:.3f}s; four complete runs")
+    print(f"Full public reference CLI: {elapsed:.3f}s; four complete runs; sustained={sustained}")

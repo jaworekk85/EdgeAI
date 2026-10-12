@@ -1,5 +1,89 @@
 # Status
 
+## 2026-10-12 — Phase 3A
+
+**State: authorized hardware preparation implemented and verified; ready for
+user review before Phase 4 CPU work. Phase 3B remains pending hardware.**
+
+### Authorization and scope
+
+- The user accepted Phase 2 and requested 3A after discussing the device purchase
+  in about three months. Recorded the architecture before implementing it.
+- Amended specification section 13 to split 3A preparation from 3B hardware work.
+  CPU/mock portions of 4–6 may proceed through their own proposals and reviews
+  while 3B remains pending; this session implements 3A only.
+- Added `docs/phase_3a_plan.md`, usage and CPU/hardware roadmap; updated architecture,
+  measurement and hardware documentation with an explicit device acceptance gate.
+
+### Done
+
+- Added standard-library offline tegrastats parsing for documented RAM, CPU/GPU,
+  temperature and instantaneous/average rail fields; preserve raw lines/units,
+  optional observations and reject malformed/duplicate supported fields.
+- Added typed timestamped replay with explicit source/rail/cadence, missing-rail
+  and irregular/gap refusal, and instantaneous mW-to-W conversion. Replay always
+  has synthetic clocks and unmeasured power; it does not replace host observations
+  or provide a power source synchronized with a new CPU run.
+- Added sustained CPU profiling: warm up once, repeat complete passes, stop at
+  duration or bounded inference count, score incrementally, and clean up on errors.
+  Actual duration/count, complete passes, target/cap outcome and descriptive
+  equal-count end-to-end latency windows are derived from raw traces.
+- Added schema 3 only for sustained records, actual timing/energy count checks,
+  recomputed summary validation, observed-clock requirements and synthetic-source
+  measurement rejection. Schema-1/2 results remain readable without edits.
+- Store sustained summaries and all reports before completion; no old run is
+  extended. Reports show targets/actuals/stop reasons and repeated-subset quality;
+  differing profiling protocols require a visible comparison override.
+- Added explicit reference CLI duration/cap overrides after verifying prepared
+  assets; save overrides in resolved config, cycle verified manifest indices,
+  account for duration in worker timeouts and retain old preparation compatibility.
+
+### Verification
+
+- Full suite with both original and sustained public reference matrices:
+  **159 passed, 2 skipped** in 51.94 s. Skips are Windows directory-symlink permissions.
+- Core-only emulation with all optional CPU/export/image/memory/plot/hardware
+  dependencies blocked: **143 passed, 18 skipped**, expected optional fixtures,
+  two opt-in reference matrices and symlink tests. Core import checks also passed.
+- Both CPU backends and both pretrained sizes reached the explicit two-second
+  sustained target in full 20-image passes; every stored record/group validated,
+  with actual count-based energy estimates and all immutable output artifacts.
+  This short check validates the mode, not minute-scale thermal behavior.
+- Verified reading an actual previous Phase 2 immutable result and its unchanged
+  prepared assets. Offline tests also remove new fields to check schema-2 defaults.
+- Parser tests cover units/formats/optional fields/duplicates/malformed values;
+  replay tests cover selected rails, timestamps/gaps and provenance. Fake clocks
+  cover duration/cap stops, warm-up, counts, scoring and failure cleanup.
+- Ruff, installed dependency consistency, local documentation links and Git
+  whitespace checks passed. Inspected a generated sustained Markdown report.
+- Public assets and generated results remain ignored; validation records honestly
+  captured the implementation Git commit with dirty=True.
+
+### Known limitations
+
+- No Jetson device profile, live onboard power/temperature source, TensorRT backend
+  or on-device command is implemented or verified. Phase 3 is not fully complete.
+- Parser coverage follows documented examples, not a capture from the future
+  device. Replay cadence tolerance is 1%; real sensors need observed timestamps
+  and a reviewed gap policy in 3B. Rail coverage is not yet device-validated.
+- Sustained mode is available for longer requested trials, but this session ran
+  only short validation. Complete-pass overshoot is possible; cap stops before
+  target are explicit. Trace memory/storage grows with bounded run length/count.
+- Latency drift is descriptive CPU behavior, with no thermal attribution. Repeated
+  images do not enlarge the evaluation dataset. All power/energy remain synthetic
+  estimates; no Jetson performance prediction or measured energy savings.
+- Compression transforms, controllers and perturbation implementations remain
+  in phases 4–6. No research experiment or calibrated device simulator was added.
+
+### Next step and deferred gate
+
+- Review 3A, then propose Phase 4 CPU compression architecture before implementation.
+- Keep separate CPU acceptance and pending Jetson validation for phases 4–6.
+  3B can begin whenever hardware becomes available, without waiting for Phase 6.
+- Capture actual JetPack/L4T before selecting hardware dependencies; review and
+  implement the 3B acceptance gate in `docs/hardware_setup.md` after device arrival.
+- Repository distribution license remains an open question.
+
 ## 2026-10-12 — Phase 2
 
 **State: approved CPU/reference plan implemented and verified; ready for user

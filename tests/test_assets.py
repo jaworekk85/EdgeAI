@@ -73,8 +73,10 @@ def test_reference_rejects_unsupported_settings():
     from edge_ai.config import DeviceSettings
     from edge_ai.profiling.protocol import ProfilingProtocol
 
-    with pytest.raises(ValueError, match="Phase 3"):
-        replace(ReferenceConfig(), protocol=ProfilingProtocol(5, 20, 1, 60))
+    sustained = replace(ReferenceConfig(), protocol=ProfilingProtocol(5, 20, 1, 60))
+    assert sustained.protocol.sustained_duration_s == 60
+    with pytest.raises(ValueError, match="complete workload pass"):
+        ProfilingProtocol(5, 20, 1, 60, sustained_max_iterations=19)
     with pytest.raises(ValueError, match="CPU adapter"):
         replace(ReferenceConfig(), device=DeviceSettings(adapter="mock"))
     with pytest.raises(ValueError, match="subset"):
