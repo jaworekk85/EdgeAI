@@ -10,6 +10,8 @@ and reference pipeline. See [CPU usage](cpu_reference.md) for tested commands.
 The [Phase 3A design](phase_3a_plan.md) adds sustained CPU profiling and offline
 telemetry preparation. The [CPU/hardware roadmap](cpu_hardware_roadmap.md) permits
 separately reviewed CPU portions of 4–6 while 3B device validation remains pending.
+The [Phase 4 design](phase_4_plan.md) and [compression usage](phase_4_usage.md)
+describe CPU transforms, lineage, calibration isolation and observed kernel evidence.
 
 ## Module responsibilities and implementation phases
 

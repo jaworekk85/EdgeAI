@@ -1,1 +1,1 @@
-"""Compression metadata, nominal accounting and tooling; implementation planned."""
+"""CPU compression metadata, nominal accounting, transforms and validation tools."""

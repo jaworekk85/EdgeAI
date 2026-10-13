@@ -59,8 +59,12 @@ class DatasetManifest:
         positive(self.seed, "dataset seed", zero=True)
         validate_digest(self.archive_sha256)
         positive(self.archive_bytes, "archive bytes")
-        if self.dataset != "imagenette2-160" or self.split != "val" or not self.samples:
-            raise ValueError("reference requires Imagenette v2 160px validation samples")
+        if (
+            self.dataset != "imagenette2-160"
+            or self.split not in ("train", "val")
+            or not self.samples
+        ):
+            raise ValueError("reference requires Imagenette v2 160px train/validation samples")
         if len({sample.path for sample in self.samples}) != len(self.samples):
             raise ValueError("manifest contains duplicate images")
 
@@ -95,6 +99,7 @@ def select_manifest(
     seed: int,
     per_class: int,
     preprocessing: PreprocessingSpec,
+    split: str = "val",
 ) -> DatasetManifest:
     positive(per_class, "per_class")
     random = Random(seed)
@@ -114,7 +119,7 @@ def select_manifest(
             )
     return DatasetManifest(
         "imagenette2-160",
-        "val",
+        split,
         seed,
         tuple(selected),
         preprocessing,

@@ -88,9 +88,18 @@ class ExperimentConfig:
         if self.artifact is not None:
             if self.artifact.checkpoint_sha256 != self.model.weights_digest:
                 raise ValueError("deployment artifact and canonical weights identity differ")
-            expected_role = {"pytorch": "checkpoint", "onnxruntime": "onnx"}.get(self.model.runtime)
-            if expected_role is not None and self.artifact.role != expected_role:
+            expected_roles = {
+                "pytorch": ("checkpoint", "compressed_checkpoint"), "onnxruntime": ("onnx",),
+            }.get(self.model.runtime)
+            if expected_roles is not None and self.artifact.role not in expected_roles:
                 raise ValueError("artifact role differs from selected runtime")
+            details = self.model.compression.details
+            if details is not None and self.artifact.export_metadata.get(
+                "compression_details"
+            ) != to_dict(details):
+                raise ValueError("artifact lineage differs from compression metadata")
+            if self.artifact.role == "compressed_checkpoint" and details is None:
+                raise ValueError("derived checkpoint requires typed compression metadata")
 
 
 def _merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:

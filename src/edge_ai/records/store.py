@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from edge_ai.records.schema import RunRecord
+from edge_ai.utils.artifacts import workspace_file
 from edge_ai.utils.serialization import from_dict, safe_name, to_dict
 
 
@@ -65,8 +66,8 @@ class ResultStore:
             raise ValueError("unsupported report artifact name or content")
         if sum(len(value) for value in reports.values()) > 50 * 1024 * 1024:
             raise ValueError("report artifacts exceed size limit")
-        if record.schema_version in (2, 3) and set(reports) != allowed_reports:
-            raise ValueError("schema version 2/3 requires complete reports before storage")
+        if record.schema_version in (2, 3, 4) and set(reports) != allowed_reports:
+            raise ValueError("schema version 2/3/4 requires complete reports before storage")
         safe_name(record.config.experiment, "experiment")
         root = self._root(record.config.workload.privacy)
         private_root = (self.workspace / "private").resolve()
@@ -75,10 +76,33 @@ class ResultStore:
             sources.append(record.config.artifact.path)
         if record.dataset_manifest is not None:
             sources.extend(item["path"] for item in record.dataset_manifest["samples"])
+        details = record.config.model.compression.details
+        kernel_profile = None
+        if details is not None:
+            sources.append(details.source_artifact.path)
+            if details.calibration_manifest is not None:
+                sources.extend(sample.path for sample in details.calibration_manifest.samples)
+            if details.kernel_evidence is not None:
+                sources.append(details.kernel_evidence.profile_path)
         if record.config.workload.privacy != "private" and any(
             (self.workspace / source).resolve().is_relative_to(private_root) for source in sources
         ):
             raise ValueError("private source cannot be written to public results")
+        if details is not None and details.kernel_evidence is not None:
+            from edge_ai.compression.verification import observed_quantized_operators
+
+            evidence = details.kernel_evidence
+            profile_path = workspace_file(
+                self.workspace, evidence.profile_path,
+                private=record.config.workload.privacy == "private",
+            )
+            if profile_path.stat().st_size > 50 * 1024 * 1024:
+                raise ValueError("kernel profile exceeds storage size limit")
+            kernel_profile = profile_path.read_bytes()
+            if hashlib.sha256(kernel_profile).hexdigest() != evidence.profile_sha256 or (
+                observed_quantized_operators(kernel_profile) != evidence.operator_counts
+            ):
+                raise ValueError("kernel profile differs from declared evidence")
         parent = root / record.config.experiment
         parent.mkdir(parents=True, exist_ok=True)
         if not parent.resolve().is_relative_to(root):
@@ -104,6 +128,11 @@ class ResultStore:
             _json(run / "traces" / "idle_power.json", record.idle_power_trace)
         if record.sustained is not None:
             _json(run / "traces" / "sustained.json", record.sustained)
+        if details is not None:
+            _json(run / "compression.json", details)
+        if kernel_profile is not None:
+            with (run / "traces" / "compression_kernel_profile.json").open("xb") as stream:
+                stream.write(kernel_profile)
         if record.memory.rss_bytes:
             _json(run / "traces" / "memory.json", record.memory)
         _json(run / "metrics.json", record)
@@ -129,7 +158,7 @@ class ResultStore:
             not isinstance(marker, dict)
             or type(marker.get("schema_version")) is not int
             or marker
-            not in [{"status": "complete", "schema_version": version} for version in (1, 2, 3)]
+            not in [{"status": "complete", "schema_version": version} for version in (1, 2, 3, 4)]
         ):
             raise ValueError("invalid completion marker")
         with (run / "metrics.json").open(encoding="utf-8") as stream:

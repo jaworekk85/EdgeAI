@@ -1,0 +1,10 @@
+experiment: compression_reference
+architecture: mobilenet_v3_small
+calibration_per_class: 1
+recipes:
+  - {id: fp16, method: fp16}
+  - {id: int8, method: int8}
+  - {id: int4-weights, method: int4, block_size: 32}
+  - {id: prune-unstructured, method: unstructured, amount: 0.25}
+  - {id: prune-channel, method: channel, amount: 0.1}
+  - {id: prune-2of4, method: '2:4'}

@@ -36,6 +36,12 @@ def baseline_changes(baseline: RunRecord, record: RunRecord) -> set[str]:
     old, new = to_dict(baseline.config.model), to_dict(record.config.model)
     changes = set()
     old_compression, new_compression = old.pop("compression"), new.pop("compression")
+    if old_compression.get("details") is not None or new_compression.get("details") is not None:
+        # A derived variant's label/precision is compression, not new pretrained weights.
+        old.pop("id")
+        new.pop("id")
+        if old.pop("precision") != new.pop("precision"):
+            changes.add("compression")
     # Nominal counts describe the model, not an applied compression transformation.
     for key in (
         "parameters",
@@ -46,6 +52,16 @@ def baseline_changes(baseline: RunRecord, record: RunRecord) -> set[str]:
     ):
         old_compression.pop(key)
         new_compression.pop(key)
+    for item in (old_compression, new_compression):
+        details = item.pop("details", None)
+        if details is not None:
+            item["transformation"] = {
+                key: details[key] for key in (
+                    "recipe", "changed_tensors", "target_elements", "total_weight_elements",
+                    "precision_scope", "zeros_before", "zeros_after", "masked_elements",
+                    "skipped_tensors", "calibration_manifest",
+                )
+            }
     if old_compression != new_compression:
         changes.add("compression")
     if old.pop("runtime") != new.pop("runtime"):
@@ -148,6 +164,10 @@ def comparison_rows(
                 "sparsity_pattern": compression.sparsity_pattern,
                 "kernel_support": compression.kernel_support,
                 "sparsity_label": compression.sparsity_label(),
+                "precision": compression.precision,
+                "compression_method": compression.method,
+                "compression_details": to_dict(compression.details),
+                "model_file_bytes": record.memory.model_file_bytes,
                 "baseline_id": record.config.baseline_id,
                 "changed_components": record.config.changed_components,
                 "settings_mismatch": to_dict(mismatch),

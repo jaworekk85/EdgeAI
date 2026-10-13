@@ -35,6 +35,9 @@ observed software stack. Verify at least the following before calling it support
 5. Recheck compression kernel support, controller switching costs and condition
    behavior introduced during CPU development. CPU acceptance does not substitute
    for Jetson validation or establish hardware energy savings.
+   CPU Phase 4 INT4 is classifier weight-only, and channel pruning uses masks.
+   Do not assume TensorRT compatibility, native arithmetic or sparse acceleration
+   from CPU artifact creation or operator-event evidence.
 6. Document the supported environment and on-device commands, run the hardware
    reference, update status and stop for review.
 

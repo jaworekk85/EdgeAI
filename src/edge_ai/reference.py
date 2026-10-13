@@ -235,6 +235,11 @@ def load_prepared(path: Path, config: ReferenceConfig, workspace: Path) -> dict:
 
 def worker(config: ExperimentConfig, manifest: DatasetManifest, workspace: Path) -> RunRecord:
     manifest.verify(workspace)
+    if config.model.compression.details is not None:
+        from edge_ai.compression.verification import verify_prepared_identity
+
+        config.model.compression.details.validate_evaluation(manifest)
+        verify_prepared_identity(config.artifact, workspace)
     if config.model.runtime == "pytorch":
         from edge_ai.runtimes.pytorch import PyTorchRuntime
 
@@ -268,7 +273,10 @@ def worker(config: ExperimentConfig, manifest: DatasetManifest, workspace: Path)
         energy=result.energy,
         quality=result.quality,
         quality_metric="top1_accuracy",
-        schema_version=3 if result.sustained is not None else 2,
+        schema_version=(
+            4 if config.model.compression.details is not None
+            else 3 if result.sustained is not None else 2
+        ),
         dataset_manifest=to_dict(manifest),
         sustained=result.sustained,
     )

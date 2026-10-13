@@ -65,6 +65,16 @@ def render_reports(records: list[RunRecord], *, allow_mismatch: bool = False) ->
         "inference_count",
         "completed_passes",
         "end_to_end_latency_change_fraction",
+        "precision",
+        "compression_method",
+        "model_file_bytes",
+        "kernel_support_method",
+        "precision_scope",
+        "target_elements",
+        "total_weight_elements",
+        "zeros_after",
+        "masked_elements",
+        "calibration_manifest_sha256",
     ]
     flat_rows = []
     for record, row in zip(records, rows):
@@ -88,6 +98,20 @@ def render_reports(records: list[RunRecord], *, allow_mismatch: bool = False) ->
             "completed_passes": record.sustained.completed_passes if record.sustained else None,
             "end_to_end_latency_change_fraction": (
                 record.sustained.latency_change_fraction if record.sustained else None
+            ),
+        })
+        compression = record.config.model.compression
+        details = compression.details
+        flat.update({
+            "kernel_support_method": compression.kernel_support_method,
+            "precision_scope": details.precision_scope if details else "FP32 baseline",
+            "target_elements": details.target_elements if details else None,
+            "total_weight_elements": details.total_weight_elements if details else None,
+            "zeros_after": details.zeros_after if details else None,
+            "masked_elements": details.masked_elements if details else None,
+            "calibration_manifest_sha256": (
+                details.calibration_manifest.digest()
+                if details and details.calibration_manifest else None
             ),
         })
         flat_rows.append(flat)
@@ -153,6 +177,42 @@ def render_reports(records: list[RunRecord], *, allow_mismatch: bool = False) ->
             f"{row['counting_exclusions']}. Memory: {row['memory_method']}. "
             f"Energy method: {row['energy_method']}."
         )
+    if any(record.config.model.compression.details is not None for record in records):
+        markdown.extend([
+            "", "## Compression coverage", "",
+            "Dense masked weights retain nominal parameters/FLOPs and dense storage/execution.",
+            "INT4 is weight-only and partial; observed quantized operators do not imply all layers",
+            "use low precision. CPU results do not establish Jetson speed or energy savings.", "",
+            "| Variant | Artifact (MiB) | Target / candidate elements | Scope | "
+            "CPU events / declaration |",
+            "| --- | --- | --- | --- | --- |",
+        ])
+        sparsity_notes = []
+        for record, row in zip(records, flat_rows):
+            details = record.config.model.compression.details
+            if details is None:
+                continue
+            size = record.memory.model_file_bytes
+            evidence = details.kernel_evidence
+            support = (
+                json.dumps(evidence.operator_counts, sort_keys=True) if evidence else
+                record.config.model.compression.kernel_support_method
+            )
+            markdown.append(
+                f"| {row['variant']} | {display(size / 2**20 if size is not None else None)} | "
+                f"{details.target_elements} / {details.total_weight_elements} | "
+                f"{details.precision_scope} | {support} |"
+            )
+            if details.zeros_after is not None:
+                sparsity_notes.extend([
+                    "", f"{row['variant']}: {details.zeros_after} actual zeros / "
+                    f"{details.target_elements} target weight entries; "
+                    f"{details.masked_elements} masked entries. Bias retained.", "",
+                ])
+        markdown.extend(sparsity_notes)
+        markdown.extend([
+            "", "Compression lineage and raw profile identities are in compression.json.", "",
+        ])
     if any(record.sustained is not None for record in records):
         markdown.extend([
             "", "## Sustained CPU profiling", "",

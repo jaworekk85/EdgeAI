@@ -29,10 +29,14 @@ class PyTorchRuntime:
 
         if self.model is not None:
             raise RuntimeError("release the loaded model first")
-        if variant.runtime != "pytorch" or self.artifact.role != "checkpoint":
+        if variant.runtime != "pytorch" or self.artifact.role not in (
+            "checkpoint", "compressed_checkpoint",
+        ):
             raise ValueError("PyTorch requires a checkpoint artifact")
         if variant.weights_digest != self.artifact.checkpoint_sha256:
             raise ValueError("checkpoint identity differs from variant")
+        if variant.precision not in ("fp32", "fp16"):
+            raise ValueError("PyTorch CPU adapter supports only FP32/FP16")
         path = self.artifact.verify(self.workspace)
         torch.set_num_threads(self.settings.intra_op_threads)
         if torch.get_num_interop_threads() != self.settings.inter_op_threads:
@@ -55,7 +59,11 @@ class PyTorchRuntime:
             raise ValueError("input must have matching NCHW shape")
         if batch.shape[0] <= 0 or not np.isfinite(batch).all():
             raise ValueError("input must be nonempty and finite")
-        return torch.from_numpy(np.ascontiguousarray(batch))
+        dtype = torch.float16 if self.variant.precision == "fp16" else torch.float32
+        prepared = torch.from_numpy(np.ascontiguousarray(batch)).to(dtype=dtype)
+        if not torch.isfinite(prepared).all():
+            raise ValueError("input conversion overflowed the runtime precision")
+        return prepared
 
     def bind_batch(self, batch) -> None:
         self._require_loaded()
@@ -75,7 +83,7 @@ class PyTorchRuntime:
         if not isinstance(batch, torch.Tensor) or batch.device.type != "cpu":
             raise ValueError("PyTorch inference requires prepared CPU tensor")
         if (
-            batch.dtype != torch.float32
+            batch.dtype != (torch.float16 if self.variant.precision == "fp16" else torch.float32)
             or batch.ndim != 4
             or batch.shape[1:]
             != (

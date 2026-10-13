@@ -125,3 +125,5 @@ Git. Upstream attribution is preserved; weights/images are not redistributed.
 Phase 3A adds [sustained CPU profiling and offline telemetry](phase_3a_usage.md).
 Jetson execution remains Phase 3B; [CPU portions of phases 4–6](cpu_hardware_roadmap.md)
 may proceed through their own reviews while device validation is pending.
+See [Phase 4 compression usage](phase_4_usage.md) for transforming and comparing
+derived variants from the same verified assets, including method/quality limitations.

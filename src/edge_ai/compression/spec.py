@@ -1,8 +1,9 @@
-"""Compression metadata; transformations and compute accounting arrive later."""
+"""Compression metadata and typed transformation/runtime evidence."""
 
 from dataclasses import dataclass
 from typing import Literal
 
+from edge_ai.compression.recipe import CompressionDetails
 from edge_ai.utils.serialization import nonempty, positive, validate_types
 
 
@@ -27,10 +28,35 @@ class CompressionSpec:
     counting_method: str | None = None
     counting_input_shape: tuple[int, ...] | None = None
     counting_exclusions: tuple[str, ...] = ()
+    details: CompressionDetails | None = None
 
     def __post_init__(self) -> None:
         validate_types(self)
         nonempty(self.precision, "precision")
+        if self.details is not None:
+            recipe = self.details.recipe
+            if self.method != recipe.compression_method or self.precision != recipe.precision:
+                raise ValueError("compression metadata differs from its transformation recipe")
+            if "pruning" in self.method:
+                expected_pattern = {
+                    "unstructured": "unstructured", "channel": "channel", "2:4": "2:4",
+                }[recipe.method]
+                if self.sparsity_pattern != expected_pattern or self.kernel_support is not False:
+                    raise ValueError("CPU pruning requires its pattern and no sparse kernels")
+                expected = self.details.zeros_after / self.details.target_elements
+                if self.sparsity_level is None or abs(self.sparsity_level - expected) > 1e-12:
+                    raise ValueError("sparsity differs from actual target-weight zero counts")
+            elif recipe.method in ("int8", "int4"):
+                if self.kernel_support is not True:
+                    raise ValueError("quantized CPU operator evidence must be declared")
+            elif self.kernel_support is not None:
+                raise ValueError("FP16 internal kernel precision remains unknown")
+            expected_calibration = (
+                self.details.calibration_manifest.digest()
+                if self.details.calibration_manifest is not None else None
+            )
+            if self.calibration != expected_calibration:
+                raise ValueError("calibration identity differs from its embedded manifest")
         if self.sparsity_level is not None and not 0 <= self.sparsity_level <= 1:
             raise ValueError("sparsity_level must lie in [0, 1]")
         if "pruning" in self.method:

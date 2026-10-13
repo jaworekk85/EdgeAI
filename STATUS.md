@@ -1,5 +1,104 @@
 # Status
 
+## 2026-10-13 — Phase 4 CPU
+
+**State: authorized CPU compression tooling implemented and verified; ready for
+user review before Phase 5. Jetson/TensorRT acceptance remains pending in 3B.**
+
+### Authorization and architecture
+
+- The user accepted 3A and explicitly requested Phase 4. Recorded
+  `docs/phase_4_plan.md` before implementation and preserved the deferred 3B gate.
+- Implemented reusable compression tools and bounded reference validation only.
+  No training, quality tuning, research sweep, controllers or condition experiments.
+
+### Done
+
+- Added small typed compression recipes, actual coverage/zero/mask statistics,
+  source-artifact lineage, calibration manifest and observed CPU kernel evidence.
+- Added exclusive FP16 checkpoint conversion and PyTorch half model/input support;
+  verify floating state dtype, finite conversion and input-overflow refusal.
+- Added static signed per-channel INT8 QDQ with disjoint seeded/checksummed train
+  calibration, explicit MinMax settings and preprocessing parity checks.
+- Added symmetric RTN blockwise INT4 MatMulNBits weights, compatible Gemm-to-MatMul
+  normalization with FP32 parity, and direct constant-MatMul support. Coverage
+  remains partial and activations/Conv FP32 in the reference.
+- Added deterministic unstructured, output-channel and 2:4 masks for constant
+  Conv/Gemm/MatMul weights; retain bias, dense shapes/storage and nominal counts.
+  Record skipped tensors and actual target-weight sparsity, with no sparse CPU
+  kernel claim. Public ONNX transforms refuse external tensor references before
+  loading referenced data; sources and result paths remain confined.
+- Probe the exact quantized ONNX artifact, retain raw CPU profile, verify observed
+  operator event counts against metadata and match artifact/host/runtime evidence.
+  FP16 internal CPU arithmetic remains unknown. Profile-based support is partial,
+  not proof that all operations use low precision.
+- Added `compressed_checkpoint` role without relaxing original checkpoint hash
+  equality, and schema 4 for transformed records. Enforce artifact/recipe/calibration
+  identity, canonical source, actual mask counts and device/runtime evidence.
+  Continue reading schemas 1–3 without editing them.
+- Store compression metadata and a hashed raw kernel-profile copy before the run
+  completion marker. Extend private-source guards to lineage/calibration/profile
+  paths; all generated data, artifacts and results stay ignored.
+- Added typed YAML matrix and separate no-download prepare/run CLI, fresh CPU
+  workers, verified whole-matrix coverage/baselines before measurement, standard
+  immutable reports and compression-only baseline attribution.
+- Documented commands, exact method scopes and observed limitations; updated
+  roadmap, architecture and hardware acceptance requirements. Stop before Phase 5.
+
+### Verification
+
+- Final full suite with ordinary/sustained reference and public compression smoke:
+  **188 passed, 2 skipped** in 79.67 s. Skips are Windows directory-symlink permissions.
+- Core-only emulation blocking all optional inference/export/image/memory/plot/
+  hardware dependencies: **152 passed, 38 skipped** (expected optional fixtures,
+  three opt-in public matrices and symlink tests). Core import checks passed.
+- All six real transforms, two runtime baselines and eight public immutable runs
+  completed, with valid comparison groups, measured timing/memory, actual artifact
+  size and strictly estimated energy. First full compression CLI: **23.046 s**.
+- Generated fixtures exercise real FP16/INT8/INT4 inference, pure independent
+  mask/tie/axis cases, direct MatMul, shape/bias preservation, no overwrite,
+  calibration overlap refusal, kernel/hash/version/device errors, private lineage
+  rejection, external-data refusal, schema round-trips and archived profile copying.
+- An ORT `ModelProto` preprocessor call exposed an external-initializer parsing
+  error; use its file-path API with explicit settings. Retained failed preparation
+  and created a fresh exclusive directory. No dependency changes or downloads.
+- Independently verified FP32 preprocessing on all 20 public evaluation inputs:
+  identical logits in diagnostic check (max error 0) and identical top-1. Also
+  checked INT8 with optimizations disabled to investigate its poor fixture quality.
+- Ruff, installed dependency checks, local documentation links and Git whitespace
+  checks passed. Read generated reports and visually inspected a six-variant plot.
+- Actual previous schema-2/3 runs remained readable. Validation records honestly
+  captured the current implementation Git commit with dirty=True; old runs unchanged.
+
+### Known limitations and observations
+
+- In the initial fixed 20-image validation, FP32/FP16/INT4 top-1 was 70%; INT8 5%,
+  unstructured masks 40%, channel/2:4 masks 0%. These are fixture observations,
+  not research accuracy estimates or recommended deployment configurations.
+- FP16 reduced artifact size but was substantially slower on this CPU. Its dtype
+  does not establish native half arithmetic. INT4 is classifier weight-only;
+  quantized operator event counts aggregate probe inputs, not unique layers.
+- INT8's severe quality loss also occurred without graph optimization, while
+  preprocessing parity held. The precise quantization/calibration cause is open;
+  no saturation diagnosis, calibration search or fine-tuning is claimed.
+- Channel pruning is masking, not graph surgery or retraining. Dense parameters/
+  FLOPs and storage need not fall. All sparse runtime support is pending 3B.
+- No measured energy, savings, Jetson timing, TensorRT execution or hardware
+  efficiency is verified. Sensor/profile provenance and immutability rules persist.
+- Initial tools cover tensor state dicts and inline constant Conv2d/Gemm/MatMul
+  weights, not arbitrary architecture/operator coverage or a production quality gate.
+
+### Next step and open questions
+
+- Review Phase 4 CPU, then propose Phase 5 controller/streaming/switching-cost
+  architecture before implementation. Phases 5–6 are not implemented or authorized
+  automatically by this session.
+- A separately authorized task can investigate calibration/quality recovery and
+  accuracy budgets; the current small validation does not establish such a target.
+- Keep 3B pending device arrival; recapture the actual JetPack/L4T stack and verify
+  TensorRT precision/sparsity/quality, real switching costs and measured energy.
+- Distribution license remains an open question from earlier phases.
+
 ## 2026-10-12 — Phase 3A
 
 **State: authorized hardware preparation implemented and verified; ready for

@@ -16,6 +16,10 @@ WORKSPACE = Path(__file__).resolve().parents[1]
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--compression-prepared", default=None,
+        help="Run the public compression matrix using this separately prepared.json path",
+    )
+    parser.addoption(
         "--reference-prepared",
         default=None,
         help="Run the public four-worker smoke using this prepared.json path",

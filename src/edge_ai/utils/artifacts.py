@@ -40,7 +40,7 @@ def workspace_file(workspace: Path, relative: str, *, private: bool = False) -> 
 class ArtifactIdentity:
     path: str
     sha256: str
-    role: Literal["checkpoint", "onnx"]
+    role: Literal["checkpoint", "compressed_checkpoint", "onnx"]
     checkpoint_sha256: str
     export_metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -54,6 +54,10 @@ class ArtifactIdentity:
             raise ValueError("checkpoint identity hashes disagree")
         if self.role == "onnx" and not self.export_metadata:
             raise ValueError("ONNX artifact requires export provenance")
+        if self.role == "compressed_checkpoint" and not self.export_metadata.get(
+            "compression_details"
+        ):
+            raise ValueError("derived checkpoint requires compression lineage")
 
     def verify(self, workspace: Path, *, private: bool = False) -> Path:
         path = workspace_file(workspace, self.path, private=private)

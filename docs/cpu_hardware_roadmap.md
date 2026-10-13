@@ -15,8 +15,9 @@ own architecture proposal, user review and status update.
 
 The recommended order is **3A → review → 4 (CPU) → review → 5 (CPU) → review →
 6 (CPU) → review**, with **3B when hardware is available**. The device can arrive
-at any point; 3B does not need to wait for Phase 6. Current authorization covers
-3A only; this schedule is not authorization to implement 4–6 or run research.
+at any point; 3B does not need to wait for Phase 6. On 2026-10-13 the user accepted
+3A and authorized [Phase 4 CPU work](phase_4_plan.md). Phases 5–6 and research
+experiments still require separate authorization; the schedule does not authorize them.
 
 CPU timings describe the CPU host. Image quality tests can be reused but must be
 rechecked after backend/precision/export changes. Simulated temperature, memory

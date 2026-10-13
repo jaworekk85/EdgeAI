@@ -37,3 +37,9 @@ assets and both CPU backends. It checks schema 3, actual counts, complete passes
 stop reason, estimated energy and reports. Parser/replay fixtures are hand-written
 format examples, not hardware data. Fake-clock tests exercise duration/cap stops
 and cleanup; sustained record validation recomputes summaries from raw traces.
+
+Phase 4 adds independent mask/axis/tie checks, generated FP16/INT8/INT4 CPU
+transforms, calibration isolation, actual operator profile evidence, immutable
+compression records, private-lineage routing and compression-only attribution.
+`--compression-prepared <prepared.json>` enables the separately prepared public
+eight-run matrix; it creates fresh ignored results and performs no downloads.

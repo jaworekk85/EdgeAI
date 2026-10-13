@@ -82,7 +82,7 @@ class RunRecord:
     quality: float | None = None
     temperature_start_c: float | None = None
     temperature_end_c: float | None = None
-    schema_version: Literal[1, 2, 3] = 1
+    schema_version: Literal[1, 2, 3, 4] = 1
     idle_power_trace: PowerTrace | None = None
     dataset_manifest: dict[str, Any] | None = None
     sustained: SustainedSummary | None = None
@@ -92,9 +92,11 @@ class RunRecord:
         safe_name(self.run_id, "run_id")
         positive(self.run_duration_s, "run_duration_s")
         config = self.config
-        if config.model.runtime in ("pytorch", "onnxruntime") and self.schema_version not in (2, 3):
-            raise ValueError("real CPU backends require schema version 2 or 3")
-        if self.schema_version in (2, 3):
+        if config.model.runtime in ("pytorch", "onnxruntime") and self.schema_version not in (
+            2, 3, 4,
+        ):
+            raise ValueError("real CPU backends require schema version 2, 3 or 4")
+        if self.schema_version in (2, 3, 4):
             if any(
                 item is None
                 for item in (
@@ -120,6 +122,7 @@ class RunRecord:
             if (
                 manifest.seed != config.seed
                 or manifest.preprocessing != config.workload.preprocessing
+                or (config.workload.split is not None and manifest.split != config.workload.split)
             ):
                 raise ValueError("dataset selection/preprocessing differs from config")
             validate_digest(config.model.weights_digest)
@@ -152,6 +155,28 @@ class RunRecord:
                 abs_tol=1e-12,
             ):
                 raise ValueError("idle power differs from raw idle trace")
+            compression = config.model.compression
+            details = compression.details
+            if self.schema_version == 4:
+                if details is None:
+                    raise ValueError("schema version 4 requires typed compression details")
+                details.validate_evaluation(manifest)
+                if details.source_artifact.checkpoint_sha256 != config.model.weights_digest:
+                    raise ValueError("compression lineage differs from canonical weights")
+                evidence = details.kernel_evidence
+                if evidence is not None and (
+                    evidence.artifact_sha256 != config.artifact.sha256
+                    or evidence.device_name != self.device.name
+                    or evidence.runtime_version != self.provenance.runtime_versions.get(
+                        "onnxruntime"
+                    )
+                    or config.model.runtime != "onnxruntime"
+                ):
+                    raise ValueError("kernel evidence differs from artifact/device/runtime")
+            elif details is not None or compression.method != "none" or (
+                config.model.precision != "fp32"
+            ):
+                raise ValueError("transformed CPU runs require schema version 4")
         if config.baseline_id == self.run_id:
             raise ValueError("a run cannot be its own baseline")
         if config.model.runtime not in self.provenance.runtime_versions:
@@ -161,7 +186,7 @@ class RunRecord:
         if self.timings.scope != "model":
             raise ValueError("primary timing trace must use model scope")
         if config.protocol.sustained_duration_s is not None:
-            if self.schema_version != 3 or self.sustained is None:
+            if self.schema_version not in (3, 4) or self.sustained is None:
                 raise ValueError("sustained runs require schema version 3 and a summary")
             if self.energy is None or self.end_to_end_timings is None:
                 raise ValueError("sustained summary requires active window and end-to-end trace")
