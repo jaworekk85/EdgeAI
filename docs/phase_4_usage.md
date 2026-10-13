@@ -105,9 +105,13 @@ slower on this CPU despite a smaller artifact.
 The FP32 preprocessed graph reproduced all original outputs exactly in the
 diagnostic check. INT8's poor fixture quality also remained with graph optimization
 disabled, so it was not explained solely by optimized integer execution. The
-precise quantization/calibration cause is unresolved. No calibration search,
-layer exclusion sweep or fine-tuning was performed. A separate authorized task
-would be needed to seek an accuracy/performance target on a representative subset.
+authorized [INT8 follow-up diagnosis](int8_diagnosis.md) subsequently isolated
+activation QDQ as sufficient to reproduce the collapse and demonstrated loss of
+small channel signals at the first depthwise input. Classifier INT8 weight rounding
+and full-network weight-only controls retained quality on this fixture. No
+calibration search, layer exclusion sweep or fine-tuning was performed. A separate
+recovery task is needed to select an accuracy/performance target on a representative
+subset and validate a revised deployment recipe.
 
 TensorRT compatibility, native FP16/INT8/INT4 execution, 2:4 eligibility and sparse
 kernel selection, shared-memory behavior and measured device energy still need

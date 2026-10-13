@@ -1,5 +1,68 @@
 # Status
 
+## 2026-10-14 — Phase 4 INT8 diagnosis
+
+**State: authorized bounded CPU diagnosis completed; findings recorded. The
+deployment recipe is unchanged and Phase 5 remains pending review.**
+
+### Authorization and approach
+
+- The user authorized investigating the unexpected INT4/INT8 quality difference.
+  Recorded `docs/int8_diagnostic_plan.md` before implementation, then recorded
+  evidence-based component/isolation controls before expanding the diagnosis.
+- Added the standalone `scripts/diagnose_int8.py` CPU entry point. It validates
+  original/prepared identities, disjoint manifests and source parity; captures
+  hashes/host/Git/runtime/script provenance, and reserves a fresh ignored artifact
+  directory. Heavy dependencies remain lazy; at most 64 images per split.
+- Streamed per-image ORT QDQ matching into split-specific statistics, avoiding
+  retention of the entire activation dataset. ORT augmentation/temporary shape
+  inference operates on fresh copies, with output hashes and completion last.
+
+### Findings
+
+- Fixed twenty-image top-1: original FP32 14/20; classifier INT4 14/20;
+  INT8 rounding of those same classifier weights with FP32 execution 14/20;
+  original broad INT8 QDQ 1/20. Equal weight scope removes the apparent bit-width
+  paradox; the rounding control does not claim deployment INT8 kernels.
+- Numerical component controls retained 15/20 with weight/bias QDQ only and
+  0/20 with activation QDQ only, without refitting scales. Activation rounding
+  is sufficient to reproduce the quality collapse in this fixture.
+- Matched 103 activations per split and inspected 108 weight/bias constants.
+  The first major accumulated error occurs at the first depthwise Conv:
+  relative L2 about 0.449 after about 0.040 at its input.
+- An isolated Conv with original FP32 input/weights/bias and only input QDQ in
+  one copy produces about 0.290 relative L2 output error on both training
+  calibration and validation. Shared step 0.12048 loses small channel signals:
+  channel 7 RMS 0.03150, 93.68% newly rounded to zero, relative input error 0.930.
+- Largest matched weight relative error about 0.0145; first depthwise weight
+  error about 0.00409. These statistics support the component controls, without
+  assuming small weight errors alone guarantee model quality.
+- Wrote `docs/int8_diagnosis.md` with reproduction, controls, exact interpretations
+  and limitations; linked the follow-up from Phase 4 usage.
+
+### Verification
+
+- Final public diagnostic completed in new
+  `artifacts/compression_diagnostics/20261013T221657564220Z_33004012bd/`.
+  Verified output/source hashes, exact diagnostic script identity and completion.
+- Independent generated tests: **3 passed**, checking component isolation against
+  explicit arithmetic/runtime outputs, signed subtraction without overflow,
+  source preservation, zero-column rounding and nonfinite/shape refusal.
+- Full regression with public ordinary/sustained/compression smoke: **191 passed,
+  2 skipped** in 117.77 s. Skips are Windows directory-symlink permissions.
+- Ruff passed for source, tests and diagnostic script; Git whitespace checks passed.
+
+### Limits and next review
+
+- No production recipe correction, accuracy recovery target, training, calibration
+  search, pruning recovery, measured energy or hardware validation was performed.
+- Shared activation range/rounding sensitivity is established here; this does not
+  prove that ten calibration images are the sole cause or that more images fix it.
+  Twenty-image quality values remain bounded pipeline observations.
+- Existing INT8 is currently unsuitable as a quality-preserving controller option.
+  Review a separate recovery task (mixed precision/calibration strategy/quality
+  budget) or the Phase 5 architecture before further implementation. Keep 3B pending.
+
 ## 2026-10-13 — Phase 4 CPU
 
 **State: authorized CPU compression tooling implemented and verified; ready for
