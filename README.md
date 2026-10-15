@@ -31,6 +31,7 @@ Core imports do not load inference, hardware or YAML libraries.
 
 ## Find your way
 
+- [Możliwości repo i pomysły eksperymentów — po polsku](docs/mozliwosci_i_eksperymenty.md).
 - [Code map and execution flow](docs/research_framework.md).
 - [Documentation by task](docs/README.md), including compression and diagnostics.
 - [Development decisions and verification history](docs/history.md).

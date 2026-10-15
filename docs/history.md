@@ -91,3 +91,10 @@ ordinary/sustained/compression smoke. Fresh diagnostic evidence is in ignored
 predictions/settings match the retained diagnosis exactly and all tensor/channel
 statistics agree within `1e-12`. Source/output hashes, old schema-2/3 reads,
 corrupt-baseline refusal, lint and documentation links were verified.
+
+The user subsequently requested a clear capabilities/experiments guide. Added
+[a Polish overview](mozliwosci_i_eksperymenty.md) distinguishing implemented CPU
+tools, small extensions, planned phases 5/6 and the device-dependent 3B gate.
+Experiment ideas describe questions, comparisons and measurements only; no
+research runs or new functionality were added.
+Checked the guide against current status/configs/usage, local links and Git whitespace.

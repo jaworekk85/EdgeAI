@@ -5,6 +5,9 @@ Maintenance is complete and verified; Phase 5 and INT8 recovery await review.**
 [Documentation index](docs/README.md) · [Code map](docs/research_framework.md) ·
 [Decisions/history](docs/history.md).
 
+New: [capabilities and experiment ideas, in Polish](docs/mozliwosci_i_eksperymenty.md).
+Documentation only; no new experiments or implementation phases were started.
+
 ## Implemented
 
 - Typed configs/metadata, provenance, immutable/private results and guarded reports.

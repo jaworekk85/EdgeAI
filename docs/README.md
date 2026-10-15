@@ -4,6 +4,9 @@ Start with [current status](../STATUS.md) and the [code map](research_framework.
 The [specification](../EDGE_AI_AGENT_RESEARCH_SPEC.md) defines mandatory scope,
 result invariants and phase gates; other documents describe their implementation.
 
+Po polsku: [Co można zbadać przy pomocy EdgeAI?](mozliwosci_i_eksperymenty.md)
+— możliwości dostępne teraz, planowane fazy i konkretne pomysły eksperymentów.
+
 | Task | Read |
 | --- | --- |
 | Install CPU dependencies, prepare models, run the reference | [CPU reference](cpu_reference.md) |
