@@ -94,10 +94,12 @@ class ExperimentConfig:
             if expected_roles is not None and self.artifact.role not in expected_roles:
                 raise ValueError("artifact role differs from selected runtime")
             details = self.model.compression.details
-            if details is not None and self.artifact.export_metadata.get(
-                "compression_details"
-            ) != to_dict(details):
-                raise ValueError("artifact lineage differs from compression metadata")
+            if details is not None:
+                from edge_ai.compression.recipe import CompressionDetails
+
+                metadata = self.artifact.export_metadata.get("compression_details")
+                if metadata is None or from_dict(CompressionDetails, metadata) != details:
+                    raise ValueError("artifact lineage differs from compression metadata")
             if self.artifact.role == "compressed_checkpoint" and details is None:
                 raise ValueError("derived checkpoint requires typed compression metadata")
 

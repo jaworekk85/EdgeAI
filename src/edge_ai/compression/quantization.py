@@ -188,18 +188,9 @@ def quantize_onnx(
         if calibration is None or evaluation is None or calibration.split != "train":
             raise ValueError("INT8 requires separate train calibration and evaluation manifests")
         # Check overlap before reserving a directory or fitting scales.
-        if (
-            calibration.preprocessing != evaluation.preprocessing
-            or (
-                {sample.path for sample in calibration.samples}
-                & {sample.path for sample in evaluation.samples}
-            )
-            or (
-                {sample.sha256 for sample in calibration.samples}
-                & {sample.sha256 for sample in evaluation.samples}
-            )
-        ):
-            raise ValueError("calibration overlaps evaluation or has different preprocessing")
+        calibration.require_disjoint(evaluation)
+        if calibration.preprocessing != evaluation.preprocessing:
+            raise ValueError("calibration and evaluation have different preprocessing")
         calibration.verify(workspace)
         evaluation.verify(workspace)
     elif calibration is not None:
@@ -230,6 +221,9 @@ def quantize_onnx(
                 self.index += 1
                 return {input_name: batch}
 
+        op_types = ["Gemm", "MatMul"]
+        if recipe.int8_scope == "all":
+            op_types.insert(0, "Conv")
         quantize_static(
             preprocessed,
             path,
@@ -238,7 +232,7 @@ def quantize_onnx(
             activation_type=QuantType.QInt8,
             weight_type=QuantType.QInt8,
             per_channel=True,
-            op_types_to_quantize=["Conv", "Gemm", "MatMul"],
+            op_types_to_quantize=op_types,
             calibrate_method=CalibrationMethod.MinMax,
             calibration_providers=["CPUExecutionProvider"],
             use_external_data_format=False,
@@ -253,8 +247,11 @@ def quantize_onnx(
         target = sum(int(np.prod(tensor.dims)) for tensor in quantized_weights)
         scope = (
             "partial Conv/Gemm/MatMul QDQ INT8; signed per-channel weights; MinMax calibration"
+            if recipe.int8_scope == "all" else
+            "Gemm/MatMul QDQ INT8 weights and activation boundaries; Conv FP32; MinMax calibration"
         )
         settings = {"format": "QDQ", "per_channel": True, "calibration": "MinMax", "signed": True}
+        settings["op_types"] = op_types
     else:
         from onnxruntime.quantization.matmul_nbits_quantizer import (
             DefaultWeightOnlyQuantConfig,

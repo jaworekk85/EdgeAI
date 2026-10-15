@@ -98,3 +98,20 @@ tools, small extensions, planned phases 5/6 and the device-dependent 3B gate.
 Experiment ideas describe questions, comparisons and measurements only; no
 research runs or new functionality were added.
 Checked the guide against current status/configs/usage, local links and Git whitespace.
+
+## 2026-10-15 — mixed INT8 recovery
+
+The user authorized recovery followed by phases 5/6 with phase reviews. A bounded
+plan fixed linear-only INT8, 100 train calibration images, 200 new validation
+images excluding the historical twenty, and a maximum 2-point quality drop.
+The mixed recipe achieved 132/200 versus FP32 133/200 (drop 0.5 points), with a
+5.37 MB file versus 10.46 MB. Broad INT8 remained at 7/200. No label-based tuning,
+training or layer sweep was performed. One fixed timing repeat followed regression.
+
+Added explicit recipe scope and shared manifest exclusion; missing historical
+fields decode to defaults. A larger-subset FP32 export tolerance failure required
+an explicitly justified 2e-4 absolute tolerance in the quality config; default
+5e-5 and exact top-1 parity remain. Failed work was retained. Full regression:
+194 passed, 2 Windows symlink skips, 83.90 s; actual old schema-2/3/4 records read.
+See [the recovery report](int8_diagnosis.md) for reproducible commands, raw evidence,
+coverage/kernel limits and the predeclared gate. Stop before Phase 5 review.

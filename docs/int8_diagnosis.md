@@ -104,11 +104,98 @@ generated fixtures; the actual public diagnostic provides the integration check.
 
 ## Consequence for the next phase
 
-Keep the existing INT8 recipe/results identifiable; they are currently unsuitable
-as a quality-preserving option for the future controller. FP32/FP16/INT4 retain
-their existing small-fixture observations. Phase 5 remains pending review.
+Keep the original broad INT8 recipe/results identifiable. The authorized follow-up
+below evaluates a conservative mixed recipe on a larger independent subset;
+full-network INT8 recovery and training remain separate work. Phase 5 follows review.
 
-A separate recovery task can test explicit mixed precision around sensitive
-activations, calibration strategies that address range imbalance, or later QAT.
-Choose a representative evaluation subset and a quality budget before claiming a
-successful deployment recipe. This diagnosis does not select or tune such a recipe.
+## Authorized recovery plan — 2026-10-15
+
+The user authorized the proposed recovery-first sequence. Before implementation:
+
+- Add one explicit INT8 recipe scope, `linear`: quantize constant Gemm/MatMul
+  weights and their activation boundaries, retain Conv and the feature extractor
+  in FP32. Keep the existing `all` scope as the default and a comparison control.
+  This follows the observed activation sensitivity; it is partial mixed precision,
+  not full-network INT8. No layer search or training.
+- Use 100 seeded training images for MinMax calibration and 200 stratified
+  validation images. Exclude the previous 20 evaluation images by path AND digest;
+  preserve that exclusion manifest in the new preparation/cache identity.
+- Predeclare a pilot quality limit: at most **2 percentage points** below the
+  matching FP32 baseline (at most four net extra errors on 200 images). Compare
+  the fixed recipes once; do not tune against this evaluation set.
+- Reuse the existing preparation/measurement/reporting tools and standard schema-4
+  records, observed integer kernels, actual coverage and estimated-only energy.
+  Old recipes, preparations and result bytes remain valid and unchanged.
+- Extend typed metadata conservatively. Legacy missing scope means `all`;
+  compare decoded compression metadata rather than rewriting historical JSON.
+  Add manifest exclusion to reference preparation, without changing default runs.
+- Verify numerical/invariant tests, legacy public smoke and the new bounded
+  matrix. Record measured CPU cost and gate outcome; quality retention does not
+  establish a speedup, population accuracy or Jetson compatibility. Stop for review
+  before Phase 5.
+
+Method reference: [ORT quantization debugging](https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html#quantization-debugging)
+describes retaining sensitive computations in floating point.
+
+Larger-subset preparation exposed a FP32 export tolerance failure (3 of 1000
+logits on one Small input, violating absolute difference up to 1.08e-4). A paired
+check of the existing canonical exports on all 200 new inputs retained **200/200
+top-1 parity per model**; maximum absolute differences were Small 1.20e-4 and
+Large 2.29e-5. Retain the failed preparation. The quality config explicitly uses
+`export_atol=2e-4` with this numerical reason; the default stays 5e-5, rtol stays
+1e-4, and exact top-1 equality remains mandatory. This concerns FP32 cross-runtime
+export only, not quantized quality or the existing ONNX-to-ONNX parity tolerance.
+
+## Recovery outcome — 2026-10-15
+
+**The mixed `linear` recipe passed the predeclared pilot gate:** 132/200 correct
+versus FP32 133/200, a **0.5 percentage-point drop**, below the 2-point limit.
+Both fixed matrices gave the same quality; the second ran after regression tests
+finished. Repetition does not increase the independent evaluation sample.
+
+| Variant (ORT CPU) | Correct / 200 | Top-1 | File MB (decimal) | Mean / p95 model latency, ms |
+| --- | ---: | ---: | ---: | ---: |
+| FP32 | 133 | 66.5% | 10.46 | 2.75 / 3.06 |
+| INT8 `all`, 100 calibration images | 7 | 3.5% | 2.82 | 6.80 / 9.50 |
+| INT8 `linear`, 100 calibration images | 132 | 66.0% | 5.37 | 2.49 / 2.78 |
+
+The mixed file is about 49% smaller. It targets **1,613,824 / 2,525,832 eligible
+weight entries**. All 52 Conv weights remain FP32; classifier weights and their
+QDQ activation boundaries change. Observed evidence was **200 QGemm execution
+events across 200 inputs**, with no quantized Conv events. This is partial kernel
+evidence, not proof that both classifier layers always execute integer arithmetic.
+The broader recipe still collapses despite the larger calibration.
+
+Latency is descriptive for this CPU/session, not an established speedup or an
+energy-saving claim. The sample remains Imagenette, not a deployment quality
+guarantee. All energy is estimated. No pruning recovery, retraining or Jetson
+validation was performed; original preparations/results were not rewritten.
+
+### Reproduce
+
+After the [CPU setup](cpu_reference.md), from the repository root:
+
+```sh
+python -m edge_ai.reference prepare --config configs/experiments/reference_quality.yaml --exclude-manifest artifacts/reference/9029ef52961e20ad/manifest.json
+python -m edge_ai.compression.reference prepare --config configs/compression/int8_quality.yaml --reference-config configs/experiments/reference_quality.yaml --reference-prepared artifacts/reference/ec224752df73e653/prepared.json
+python -m edge_ai.compression.reference run --config configs/compression/int8_quality.yaml --reference-config configs/experiments/reference_quality.yaml --prepared artifacts/compression/20261015T121525126988Z_cda3a8f856/prepared.json
+```
+
+Use the preparation paths printed for your environment; changed versions/settings
+produce different identities. Matching reference preparation was verified reusable.
+Compression preparation and each measurement reserve fresh directories.
+The configs fix the two scopes, 100-image train calibration and 200-image evaluation.
+Exclusion is recorded in the reference preparation and its cache identity; image
+paths and content hashes cannot overlap the historical twenty-image manifest.
+
+Retained final evidence:
+
+- Report: `results/int8_quality/20261015T121844864837Z_989264f8b3/report.md`.
+- Pilot gate: `artifacts/int8_quality_checks/20261015T122004269445Z_e8074c6e6b/quality_gate.json`
+  records the threshold, observed difference, run paths/hashes, coverage, dataset
+  digests and Git/runtime provenance; completion was written last.
+- Regression: **194 passed, 2 Windows symlink skips** in 83.90 s, including legacy
+  ordinary/sustained/compression smoke. Follow-up scope guards passed independently.
+  Generated checks verify unchanged Conv tensors, actual partial kernels, strict
+  scopes, exclusion of renamed image duplicates and explicit tolerance reasons.
+  Actual historical schema-2/3/4 records remain readable.

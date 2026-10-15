@@ -5,7 +5,7 @@ from pathlib import Path
 
 from edge_ai.devices.profile import package_versions
 from edge_ai.utils.artifacts import ArtifactIdentity, sha256_file
-from edge_ai.utils.serialization import to_dict
+from edge_ai.utils.serialization import nonempty, positive, to_dict
 
 
 def export_onnx(
@@ -16,12 +16,19 @@ def export_onnx(
     workspace: Path,
     checkpoint_sha256: str,
     verification_batches: tuple = (),
+    atol: float = 5e-5,
+    tolerance_reason: str | None = None,
 ) -> ArtifactIdentity:
     import numpy as np
     import onnx
     import onnxruntime as ort
     import torch
 
+    positive(atol, "export absolute tolerance")
+    if atol != 5e-5 and tolerance_reason is None:
+        raise ValueError("changed export tolerance requires an explicit numerical reason")
+    if tolerance_reason is not None:
+        nonempty(tolerance_reason, "export tolerance reason")
     destination.mkdir(parents=True, exist_ok=False)
     (destination / "incomplete.json").write_text('{"status":"incomplete"}', encoding="utf-8")
     model = model.cpu().eval()
@@ -50,7 +57,7 @@ def export_onnx(
         with torch.inference_mode():
             expected = model(torch.from_numpy(batch)).numpy()
         actual = session.run(None, {"images": batch})[0]
-        np.testing.assert_allclose(actual, expected, rtol=1e-4, atol=5e-5)
+        np.testing.assert_allclose(actual, expected, rtol=1e-4, atol=atol)
         if not np.array_equal(actual.argmax(axis=1), expected.argmax(axis=1)):
             raise ValueError("ONNX/PyTorch top-1 predictions differ")
         maximum_error = max(maximum_error, float(np.max(np.abs(actual - expected))))
@@ -68,8 +75,10 @@ def export_onnx(
         "onnxruntime": ort.__version__,
         "verification_samples": len(batches),
         "rtol": 1e-4,
-        "atol": 5e-5,
-        "tolerance_reason": "CPU FP32 backend rounding; observed near-zero difference 1.78e-5",
+        "atol": atol,
+        "tolerance_reason": tolerance_reason or (
+            "CPU FP32 backend rounding; observed near-zero difference 1.78e-5"
+        ),
         "export_versions": package_versions(
             ("torch", "torchvision", "onnx", "onnxscript", "onnx_ir")
         ),

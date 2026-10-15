@@ -11,7 +11,7 @@ from typing import Literal
 
 from edge_ai.compression.pruning import prune_onnx
 from edge_ai.compression.quantization import checkpoint_fp16, quantize_onnx
-from edge_ai.compression.recipe import CompressionRecipe
+from edge_ai.compression.recipe import CompressionDetails, CompressionRecipe
 from edge_ai.compression.verification import (
     reserve_directory,
     verify_prepared_identity,
@@ -200,13 +200,13 @@ def load_compression_prepared(
     file = workspace_file(workspace, prepared.relative_to(workspace).as_posix())
     assets = json.loads(file.read_text(encoding="utf-8"))
     matrix = matrix or from_dict(CompressionReferenceConfig, assets["matrix"])
-    if assets["matrix"] != to_dict(matrix) or json.loads(
+    if from_dict(CompressionReferenceConfig, assets["matrix"]) != matrix or json.loads(
         (file.parent / "complete.json").read_text(encoding="utf-8")
     ) != {"status": "complete"}:
         raise ValueError("compression preparation differs from matrix or is incomplete")
     reference_path = Path(assets["reference_config_path"])
     reference = load_reference_config(reference_path, workspace)
-    if assets["reference_config"] != to_dict(reference):
+    if from_dict(ReferenceConfig, assets["reference_config"]) != reference:
         raise ValueError("reference settings differ from compression preparation")
     source_path = workspace_file(workspace, assets["source_prepared"])
     if sha256_file(source_path) != assets["source_prepared_sha256"]:
@@ -316,7 +316,8 @@ def validate_descriptors(
             for field in nominal_fields
         ):
             raise ValueError("compression changed the root model or nominal dense dimensions")
-        if identity.export_metadata.get("compression_details") != to_dict(details):
+        metadata = identity.export_metadata.get("compression_details")
+        if metadata is None or from_dict(CompressionDetails, metadata) != details:
             raise ValueError("prepared artifact and variant compression lineage differ")
         details.validate_evaluation(manifest)
         verify_prepared_identity(identity, workspace)

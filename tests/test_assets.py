@@ -64,9 +64,21 @@ def test_manifest_selection_is_stratified_seeded_and_verified(tmp_path):
     assert first == second and first.digest() != other.digest()
     assert len(first.samples) == 20
     first.verify(tmp_path)
+    # A renamed duplicate must also be excluded, even if its path is new.
+    for sample in first.samples:
+        path = tmp_path / sample.path
+        (path.parent / ("copy_" + path.name)).write_bytes(path.read_bytes())
+    fresh = select_manifest(tmp_path, images, archive, seed=7, exclude=first, **arguments)
+    fresh.require_disjoint(first)
+    assert fresh == select_manifest(tmp_path, images, archive, seed=7, exclude=first, **arguments)
+    assert len(fresh.samples) == 20
+    with pytest.raises(ValueError, match="overlap"):
+        first.require_disjoint(replace(first, samples=(first.samples[0],)))
     (tmp_path / first.samples[0].path).write_bytes(b"changed")
     with pytest.raises(ValueError, match="SHA-256"):
         first.verify(tmp_path)
+    with pytest.raises(ValueError, match="SHA-256"):
+        select_manifest(tmp_path, images, archive, seed=7, exclude=first, **arguments)
 
 
 def test_reference_rejects_unsupported_settings():
@@ -81,3 +93,9 @@ def test_reference_rejects_unsupported_settings():
         replace(ReferenceConfig(), device=DeviceSettings(adapter="mock"))
     with pytest.raises(ValueError, match="subset"):
         replace(ReferenceConfig(), per_class=3)
+    with pytest.raises(ValueError, match="numerical reason"):
+        replace(ReferenceConfig(), export_atol=0.0002)
+    with pytest.raises(ValueError, match="positive"):
+        replace(ReferenceConfig(), export_atol=0)
+    changed = replace(ReferenceConfig(), export_atol=0.0002, export_atol_reason="paired FP32 check")
+    assert changed.export_atol == 0.0002 and changed.digest() != ReferenceConfig().digest()

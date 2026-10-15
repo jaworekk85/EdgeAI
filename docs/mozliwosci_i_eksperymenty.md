@@ -34,7 +34,8 @@ Pamięć procesu obejmuje także biblioteki i środowisko wykonania.
 Ograniczenia obecnych metod kompresji:
 
 - **FP16:** zmniejsza precyzję modelu i wejścia w PyTorch. Na tym CPU był wolniejszy.
-- **INT8:** obejmuje wagi i aktywacje części operacji. Obecna receptura mocno traci jakość.
+- **INT8:** obejmuje wagi i aktywacje części operacji. Domyślna szeroka receptura
+  mocno traci jakość; jest już wariant mieszany `linear`, zachowujący sploty w FP32.
 - **INT4:** zmienia tylko wagi końcowego klasyfikatora; sploty i aktywacje pozostają FP32.
 - **Pruning:** zeruje wagi, ale zachowuje gęste tensory i ich rozmiary. Dotyczy to
   także masek całych kanałów i wzorca 2:4. Fizycznego usuwania kanałów jeszcze nie ma.
@@ -91,8 +92,10 @@ podzbiór, więc nie przeanalizuje bez zmian całej kalibracji liczącej 100 obr
 **Wynik:** sprawdzenie wpływu liczby danych, bez zakładania, że większa kalibracja
 rozwiąże problem. Znamy już utratę małych sygnałów przy wspólnej skali aktywacji.
 
-Zachowanie wybranych fragmentów w FP32 albo zmiana metody kalibracji wymaga
-osobnego rozszerzenia receptury. Takiej poprawionej konfiguracji jeszcze nie ma.
+Wykonano już [sprawdzenie wariantu mieszanego](int8_diagnosis.md): 66% trafności
+wobec 66,5% FP32 na 200 nowych obrazach, przy 100 obrazach kalibracyjnych.
+Ustawienie `int8_scope: linear` zachowuje sploty w FP32. Szersza kwantyzacja nadal
+traci jakość; inne zakresy lub metody kalibracji wymagają dalszego rozszerzenia.
 
 ### D. Jak szybko pruning niszczy jakość?
 
@@ -201,8 +204,9 @@ które wskazały problemy do zbadania. Nie są rankingiem metod kompresji.
 ## 5. Proponowana kolejność prac
 
 Najpierw **A i B na większym zbiorze**, aby ustalić punkt odniesienia oraz budżet
-jakości. Następnie **C i ewentualne rozszerzenie receptury INT8**, żeby zbudować
-sensowny zestaw wariantów do wyboru. Faza 5 pozwoli porównać strategie **F**,
+jakości. Wstępny krok obejmujący Small i mieszany INT8 na 200 obrazach już wykonano.
+Dalsze **C** pozostaje osobnym badaniem; można teraz zaprojektować fazę 5
+ze sprawdzonymi wariantami. Faza 5 pozwoli porównać strategie **F**,
 a faza 6 ich odporność w **G**. Po uzyskaniu sprzętu 3B odblokuje **H** niezależnie
 od tego, jak daleko zajdą prace CPU. **D i E** można wybrać jako osobne badania.
 

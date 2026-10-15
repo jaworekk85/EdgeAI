@@ -70,6 +70,13 @@ against the original ONNX outputs before lossy conversion (`rtol=1e-4`, `atol=5e
 identical top-1). The tested ORT preprocessor takes a file path: passing its
 `ModelProto` overload exposed an external-initializer error in this installed stack.
 
+INT8 recipes accept `int8_scope: all` (default, including legacy recipes) or
+`int8_scope: linear` (Gemm/MatMul weights and activation boundaries, Conv FP32).
+The latter is mixed precision. The [200-image recovery check](int8_diagnosis.md)
+retained 66% versus FP32 66.5% with a roughly 49% smaller file. Its separate
+`int8_quality.yaml` matrix uses 100 train calibration images. Older raw metadata
+without this field decodes as `all`; historical JSON and profiles stay unchanged.
+
 ## Kernel and result provenance
 
 ONNX preparation probes the exact derived file with CPU execution and preserves

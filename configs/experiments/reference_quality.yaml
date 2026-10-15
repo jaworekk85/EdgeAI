@@ -1,0 +1,12 @@
+experiment: reference_quality
+seed: 7
+per_class: 20
+export_atol: 0.0002
+export_atol_reason: >-
+  200-image FP32 check: Small max abs 1.20e-4, Large 2.29e-5;
+  200/200 top1 parity per model. Original 5e-5 remains default;
+  explicit 2e-4 used for larger-subset backend rounding only.
+protocol:
+  warmup_iterations: 5
+  iterations: 200
+  repetitions: 1

@@ -81,6 +81,14 @@ logit difference of `1.78e-5`; the final observed maximum absolute differences
 were `4.63e-5` for Small and `1.83e-5` for Large. Export metadata records versions,
 tolerances, observed error and artifact identity; tolerances never change silently.
 
+Reference preparation also accepts `--exclude-manifest <manifest.json>` to omit
+historical images by path and content hash. Its snapshot/digest participates in
+preparation provenance/cache identity. Larger subsets need matching `per_class`
+and `protocol.iterations`, with fresh preparation. The optional `export_atol`
+config keeps 5e-5 by default; any change requires `export_atol_reason`, is captured
+in export metadata and never relaxes exact top-1 parity. See the separately
+documented [200-image check](int8_diagnosis.md) for its explicit 2e-4 tolerance.
+
 Quality uses the full 1000-class output with checked Imagenette WordNet-ID mapping.
 The 20-image subset validates plumbing and is too small for research conclusions.
 Nominal FLOPs are partial Conv2d/Linear counts (MAC = two FLOPs, bias adds included),

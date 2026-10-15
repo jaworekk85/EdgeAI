@@ -1,0 +1,6 @@
+experiment: int8_quality
+architecture: mobilenet_v3_small
+calibration_per_class: 10
+recipes:
+  - {id: int8-all, method: int8}
+  - {id: int8-linear, method: int8, int8_scope: linear}

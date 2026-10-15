@@ -89,6 +89,14 @@ class DatasetManifest:
             workspace_file(workspace, sample.path), self.preprocessing
         ), sample.label
 
+    def require_disjoint(self, other: DatasetManifest) -> None:
+        if (
+            {sample.path for sample in self.samples} & {sample.path for sample in other.samples}
+        ) or (
+            {sample.sha256 for sample in self.samples} & {sample.sha256 for sample in other.samples}
+        ):
+            raise ValueError("dataset overlaps another manifest by path or image digest")
+
 
 def select_manifest(
     workspace: Path,
@@ -100,19 +108,35 @@ def select_manifest(
     per_class: int,
     preprocessing: PreprocessingSpec,
     split: str = "val",
+    exclude: DatasetManifest | None = None,
 ) -> DatasetManifest:
     positive(per_class, "per_class")
     random = Random(seed)
     selected = []
+    if exclude is not None:
+        exclude.verify(workspace)
+    excluded_paths = {sample.path for sample in exclude.samples} if exclude else set()
+    excluded_hashes = {sample.sha256 for sample in exclude.samples} if exclude else set()
     for wnid, label in sorted(IMAGENETTE_LABELS.items()):
         candidates = sorted((image_root / wnid).glob("*.JPEG"))
+        if exclude is not None:
+            eligible = []
+            for path in candidates:
+                relative = path.resolve().relative_to(workspace.resolve()).as_posix()
+                if relative not in excluded_paths and sha256_file(
+                    workspace_file(workspace, relative)
+                ) not in excluded_hashes:
+                    eligible.append(path)
+            candidates = eligible
         if len(candidates) < per_class:
             raise ValueError(f"insufficient validation images in {wnid}")
         for path in sorted(random.sample(candidates, per_class)):
             selected.append(
                 ImageSample(
                     path.resolve().relative_to(workspace.resolve()).as_posix(),
-                    sha256_file(path),
+                    sha256_file(workspace_file(
+                        workspace, path.resolve().relative_to(workspace.resolve()).as_posix()
+                    )),
                     label,
                     wnid,
                 )

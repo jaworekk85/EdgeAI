@@ -31,7 +31,14 @@ from edge_ai.reporting.render import render_reports
 from edge_ai.utils.artifacts import ArtifactIdentity, sha256_file, workspace_file
 from edge_ai.utils.downloads import download_public, extract_images
 from edge_ai.utils.provenance import capture_provenance
-from edge_ai.utils.serialization import from_dict, positive, safe_name, to_dict, validate_types
+from edge_ai.utils.serialization import (
+    from_dict,
+    nonempty,
+    positive,
+    safe_name,
+    to_dict,
+    validate_types,
+)
 
 
 @dataclass(frozen=True)
@@ -51,12 +58,19 @@ class ReferenceConfig:
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     power: PowerSettings = field(default_factory=PowerSettings)
     device: DeviceSettings = field(default_factory=DeviceSettings)
+    export_atol: float = 5e-5
+    export_atol_reason: str | None = None
 
     def __post_init__(self):
         validate_types(self)
         safe_name(self.experiment, "reference experiment")
         positive(self.seed, "seed", zero=True)
         positive(self.per_class, "per_class")
+        positive(self.export_atol, "export absolute tolerance")
+        if self.export_atol != 5e-5 and self.export_atol_reason is None:
+            raise ValueError("changed export tolerance requires an explicit numerical reason")
+        if self.export_atol_reason is not None:
+            nonempty(self.export_atol_reason, "export tolerance reason")
         if not self.architectures or not self.runtimes:
             raise ValueError("reference requires models and runtimes")
         if len(set(self.architectures)) != len(self.architectures) or len(
@@ -83,7 +97,9 @@ def load_reference_config(path: Path, workspace: Path) -> ReferenceConfig:
     return from_dict(ReferenceConfig, read_yaml(file))
 
 
-def prepare_reference(config: ReferenceConfig, workspace: Path) -> Path:
+def prepare_reference(
+    config: ReferenceConfig, workspace: Path, *, exclude_manifest: DatasetManifest | None = None,
+) -> Path:
     import torch
     from torchvision.models import MobileNet_V3_Large_Weights, MobileNet_V3_Small_Weights
 
@@ -92,18 +108,20 @@ def prepare_reference(config: ReferenceConfig, workspace: Path) -> Path:
     versions = package_versions(
         ("torch", "torchvision", "onnx", "onnxscript", "onnx_ir", "onnxruntime")
     )
-    identity = hashlib.sha256(
-        json.dumps(
-            {"config": config.digest(), "versions": versions, "preparation_revision": 1},
-            sort_keys=True,
-        ).encode()
-    ).hexdigest()
+    basis = {"config": config.digest(), "versions": versions, "preparation_revision": 1}
+    if exclude_manifest is not None:
+        exclude_manifest.verify(workspace)
+        basis["excluded_manifest_sha256"] = exclude_manifest.digest()
+    identity = hashlib.sha256(json.dumps(basis, sort_keys=True).encode()).hexdigest()
     parent = workspace / "artifacts" / "reference"
     root = parent / identity[:16]
     for candidate in (root, *sorted(parent.glob(identity[:16] + "_*"))):
         prepared = candidate / "prepared.json"
         if prepared.exists():
-            load_prepared(prepared, config, workspace)
+            cached = load_prepared(prepared, config, workspace)
+            expected = to_dict(exclude_manifest) if exclude_manifest else None
+            if cached.get("excluded_manifest") != expected:
+                raise ValueError("cached reference differs from requested exclusion manifest")
             return prepared
     if root.exists():
         # Retain interrupted preparations; reserve a new directory instead of overwriting.
@@ -122,6 +140,7 @@ def prepare_reference(config: ReferenceConfig, workspace: Path) -> Path:
         seed=config.seed,
         per_class=config.per_class,
         preprocessing=config.preprocessing,
+        exclude=exclude_manifest,
     )
     manifest_path = root / "manifest.json"
     with manifest_path.open("x", encoding="utf-8") as stream:
@@ -172,6 +191,8 @@ def prepare_reference(config: ReferenceConfig, workspace: Path) -> Path:
             workspace=workspace,
             checkpoint_sha256=checkpoint_hash,
             verification_batches=batches,
+            atol=config.export_atol,
+            tolerance_reason=config.export_atol_reason,
         )
         variants.append(
             {
@@ -190,6 +211,7 @@ def prepare_reference(config: ReferenceConfig, workspace: Path) -> Path:
                 "manifest": to_dict(manifest),
                 "manifest_path": manifest_path.relative_to(workspace).as_posix(),
                 "variants": variants,
+                **({"excluded_manifest": to_dict(exclude_manifest)} if exclude_manifest else {}),
             },
             stream,
             indent=2,
@@ -225,6 +247,10 @@ def load_prepared(path: Path, config: ReferenceConfig, workspace: Path) -> dict:
     if stored != data["manifest"]:
         raise ValueError("manifest file differs from prepared identity")
     manifest.verify(workspace)
+    if data.get("excluded_manifest") is not None:
+        excluded = from_dict(DatasetManifest, data["excluded_manifest"])
+        excluded.verify(workspace)
+        manifest.require_disjoint(excluded)
     if [item["model"]["architecture"] for item in data["variants"]] != list(config.architectures):
         raise ValueError("prepared model matrix differs from reference config")
     for item in data["variants"]:
@@ -388,11 +414,15 @@ def main():
         "--config", type=Path, default=Path("configs/experiments/reference_cpu.yaml")
     )
     parser.add_argument("--prepared", type=Path)
+    parser.add_argument("--exclude-manifest", type=Path,
+                        help="prepare only: omit these historical paths and image digests")
     parser.add_argument("--request", type=Path)
     parser.add_argument("--response", type=Path)
     parser.add_argument("--sustained-seconds", type=float)
     parser.add_argument("--max-inferences", type=int)
     arguments = parser.parse_args()
+    if arguments.exclude_manifest is not None and arguments.command != "prepare":
+        parser.error("--exclude-manifest is supported only by prepare")
     if arguments.command != "run" and (
         arguments.sustained_seconds is not None or arguments.max_inferences is not None
     ):
@@ -410,7 +440,16 @@ def main():
         config = load_reference_config(arguments.config, workspace)
         if arguments.command == "prepare":
             started = perf_counter()
-            print(prepare_reference(config, workspace))
+            excluded = None
+            if arguments.exclude_manifest is not None:
+                relative = (
+                    arguments.exclude_manifest.relative_to(workspace)
+                    if arguments.exclude_manifest.is_absolute() else arguments.exclude_manifest
+                )
+                excluded = from_dict(DatasetManifest, json.loads(
+                    workspace_file(workspace, relative.as_posix()).read_text(encoding="utf-8")
+                ))
+            print(prepare_reference(config, workspace, exclude_manifest=excluded))
             print(f"Preparation wall time: {perf_counter() - started:.3f} s")
         else:
             if arguments.prepared is None:

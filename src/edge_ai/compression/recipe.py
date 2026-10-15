@@ -16,6 +16,7 @@ class CompressionRecipe:
     method: Literal["fp16", "int8", "int4", "unstructured", "channel", "2:4"]
     amount: float | None = None
     block_size: int = 32
+    int8_scope: Literal["all", "linear"] = "all"
 
     def __post_init__(self) -> None:
         validate_types(self)
@@ -29,6 +30,8 @@ class CompressionRecipe:
             raise ValueError("INT4 block size must be a power of two >= 16")
         if self.method != "int4" and self.block_size != 32:
             raise ValueError("block size applies only to INT4")
+        if self.method != "int8" and self.int8_scope != "all":
+            raise ValueError("INT8 scope applies only to INT8")
 
     @property
     def precision(self) -> str:
@@ -151,6 +154,8 @@ class CompressionDetails:
                 raise ValueError("INT4 requires observed MatMulNBits kernels")
             if self.recipe.method == "int8" and not names - {"MatMulNBits"}:
                 raise ValueError("INT8 requires observed integer CPU kernels")
+            if self.recipe.int8_scope == "linear" and names & {"QLinearConv", "ConvInteger"}:
+                raise ValueError("linear-only INT8 cannot claim quantized Conv kernels")
         if self.recipe.method == "fp16" and self.kernel_evidence is not None:
             raise ValueError("FP16 PyTorch kernel internals are not verified by an ORT probe")
 
@@ -160,11 +165,4 @@ class CompressionDetails:
             return
         if calibration.preprocessing != evaluation.preprocessing:
             raise ValueError("calibration and evaluation preprocessing differ")
-        if (
-            {sample.path for sample in calibration.samples}
-            & {sample.path for sample in evaluation.samples}
-        ) or (
-            {sample.sha256 for sample in calibration.samples}
-            & {sample.sha256 for sample in evaluation.samples}
-        ):
-            raise ValueError("calibration and evaluation overlap")
+        calibration.require_disjoint(evaluation)

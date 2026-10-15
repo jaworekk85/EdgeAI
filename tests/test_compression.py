@@ -18,6 +18,8 @@ from edge_ai.utils.serialization import from_dict, to_dict
         {"id": "bad", "method": "int4", "block_size": 15},
         {"id": "bad", "method": "int4", "block_size": 24},
         {"id": "bad", "method": "fp16", "block_size": 64},
+        {"id": "bad", "method": "fp16", "int8_scope": "linear"},
+        {"id": "bad", "method": "int8", "int8_scope": "unknown"},
     ],
 )
 def test_invalid_compression_recipes(arguments):
@@ -447,6 +449,8 @@ def test_schema_calibration_and_kernel_provenance_fail_closed(
 
     _, _, _, _, manifests, _, _, _ = compression_assets
     _, spec = compressed_variants["int8"]
+    with pytest.raises(ValueError, match="linear-only INT8"):
+        replace(spec.details, recipe=replace(spec.details.recipe, int8_scope="linear"))
     with pytest.raises(ValueError, match="calibration identity"):
         replace(spec, calibration="not-the-manifest")
     with pytest.raises(ValueError, match="integer CPU kernels"):
@@ -514,3 +518,31 @@ def test_external_onnx_tensors_rejected_before_following_paths(compression_asset
             verification_batches=batches,
         )
     assert not (root / "external_result").exists()
+
+
+def test_int8_linear_retains_conv_fp32_and_records_partial_integer_coverage(compression_assets):
+    import onnx
+    from onnx import numpy_helper
+
+    from edge_ai.compression.quantization import quantize_onnx
+    from edge_ai.utils.artifacts import sha256_file
+
+    root, _, source, nominal, manifests, batches, _, np = compression_assets
+    identity, spec = quantize_onnx(
+        source, nominal, CompressionRecipe("linear", "int8", int8_scope="linear"),
+        root / "linear", workspace=root, verification_batches=batches,
+        calibration=manifests["train"], evaluation=manifests["val"],
+    )
+    before = {tensor.name: numpy_helper.to_array(tensor)
+              for tensor in onnx.load(str(source.verify(root))).graph.initializer}
+    after = {tensor.name: numpy_helper.to_array(tensor)
+             for tensor in onnx.load(str(identity.verify(root))).graph.initializer}
+    np.testing.assert_array_equal(before["cw"], after["cw"])
+    np.testing.assert_array_equal(before["cb"], after["cb"])
+    assert after["cw"].dtype == np.float32
+    assert spec.details.changed_tensors == ("lw_quantized",)
+    assert spec.details.target_elements < spec.details.total_weight_elements
+    assert "QGemm" in spec.details.kernel_evidence.operator_counts
+    assert "QLinearConv" not in spec.details.kernel_evidence.operator_counts
+    assert identity.export_metadata["settings"]["op_types"] == ["Gemm", "MatMul"]
+    assert sha256_file(root / source.path) == source.sha256
