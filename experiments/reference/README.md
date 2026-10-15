@@ -7,7 +7,7 @@ energy estimates, Markdown/CSV tables and Pareto plots. Values are pipeline
 checks, not research results. See [CPU usage](../../docs/cpu_reference.md).
 
 CPU runs use mock power and therefore report only labeled energy estimates.
-Future Phase 3 Jetson runs will use measured power. Keep the experiment config the same apart from
-the device selection. The CPU smoke run should finish in under approximately
+Phase 3B will implement and validate measured device power; changing a CPU config
+alone does not enable hardware support. The CPU smoke run should finish in under approximately
 two minutes. Preparation downloads/checksums public assets separately from runs.
 Weights, data, prepared artifacts and generated results are ignored by Git.

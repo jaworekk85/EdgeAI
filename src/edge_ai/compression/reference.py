@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
-import sys
-import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
@@ -20,14 +17,18 @@ from edge_ai.compression.verification import (
     verify_prepared_identity,
     write_json,
 )
-from edge_ai.config import ExperimentConfig, read_yaml
+from edge_ai.config import read_yaml
 from edge_ai.datasets.manifest import DatasetManifest, select_manifest
-from edge_ai.datasets.workload import Workload
 from edge_ai.models.variant import ModelVariant
-from edge_ai.records.schema import RunRecord
 from edge_ai.records.store import ResultStore, new_run_id
-from edge_ai.reference import load_prepared, load_reference_config
-from edge_ai.reporting.comparison import baseline_changes
+from edge_ai.reference import (
+    ReferenceConfig,
+    load_prepared,
+    load_reference_config,
+    reference_experiment,
+    run_worker,
+    with_baseline,
+)
 from edge_ai.reporting.render import render_reports
 from edge_ai.utils.artifacts import ArtifactIdentity, sha256_file, workspace_file
 from edge_ai.utils.serialization import from_dict, positive, safe_name, to_dict, validate_types
@@ -184,13 +185,21 @@ def prepare_compression(
     return prepared
 
 
-def run_compression(
-    matrix: CompressionReferenceConfig,
-    prepared: Path,
-    workspace: Path,
-) -> list[Path]:
+@dataclass(frozen=True)
+class PreparedCompression:
+    matrix: CompressionReferenceConfig
+    reference: ReferenceConfig
+    manifest: DatasetManifest
+    assets: dict
+
+
+def load_compression_prepared(
+    prepared: Path, workspace: Path, matrix: CompressionReferenceConfig | None = None,
+) -> PreparedCompression:
+    """Verify the entire source/matrix before benchmarking or diagnostics."""
     file = workspace_file(workspace, prepared.relative_to(workspace).as_posix())
     assets = json.loads(file.read_text(encoding="utf-8"))
+    matrix = matrix or from_dict(CompressionReferenceConfig, assets["matrix"])
     if assets["matrix"] != to_dict(matrix) or json.loads(
         (file.parent / "complete.json").read_text(encoding="utf-8")
     ) != {"status": "complete"}:
@@ -209,90 +218,31 @@ def run_compression(
     ):
         raise ValueError("compression evaluation differs from original verified manifest")
     manifest = from_dict(DatasetManifest, assets["manifest"])
-    expected = {recipe.id for recipe in matrix.recipes}
     validate_descriptors(matrix, assets["variants"], original["variants"], manifest, workspace)
-    found = set()
+    return PreparedCompression(matrix, reference, manifest, assets)
+
+
+def run_compression(
+    matrix: CompressionReferenceConfig,
+    prepared: Path,
+    workspace: Path,
+) -> list[Path]:
+    loaded = load_compression_prepared(prepared, workspace, matrix)
+    reference, manifest, assets = loaded.reference, loaded.manifest, loaded.assets
     groups = {}
     started = perf_counter()
-    with tempfile.TemporaryDirectory(prefix="edge-ai-compression-") as temporary:
-        temporary = Path(temporary)
-        for descriptor in assets["variants"]:
-            model = from_dict(ModelVariant, descriptor["model"])
-            identity = from_dict(ArtifactIdentity, descriptor["artifact"])
-            if model.architecture != matrix.architecture:
-                raise ValueError("prepared compression architecture differs from matrix")
-            details = model.compression.details
-            if details is not None:
-                if details.recipe not in matrix.recipes or details.recipe.id in found:
-                    raise ValueError("prepared compression recipe is unexpected or duplicated")
-                found.add(details.recipe.id)
-                details.validate_evaluation(manifest)
-                verify_prepared_identity(identity, workspace)
-            else:
-                identity.verify(workspace)
-            config = ExperimentConfig(
-                matrix.experiment,
-                reference.seed,
-                model,
-                Workload(
-                    "classification",
-                    "dataset",
-                    assets["manifest_path"],
-                    reference.preprocessing.crop,
-                    1,
-                    split="val",
-                    subset=f"{reference.per_class}/class",
-                    preprocessing=reference.preprocessing,
-                    manifest_sha256=manifest.digest(),
-                ),
-                protocol=reference.protocol,
-                device=reference.device,
-                artifact=identity,
-                execution=reference.execution,
-                power=reference.power,
-            )
-            request, response = temporary / "request.json", temporary / "response.json"
-            request.write_text(
-                json.dumps({"config": to_dict(config), "manifest": to_dict(manifest)}),
-                encoding="utf-8",
-            )
-            completed = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "edge_ai.reference",
-                    "worker",
-                    "--workspace",
-                    str(workspace),
-                    "--request",
-                    str(request),
-                    "--response",
-                    str(response),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=110 + (reference.protocol.sustained_duration_s or 0),
-            )
-            if completed.returncode:
-                raise RuntimeError(f"compression worker failed: {completed.stderr}")
-            record = from_dict(RunRecord, json.loads(response.read_text(encoding="utf-8")))
-            records = groups.setdefault(model.runtime, [])
-            if records:
-                baseline = records[0]
-                config = replace(
-                    config,
-                    baseline_id=baseline.run_id,
-                    changed_components=tuple(sorted(baseline_changes(baseline, record))),
-                )
-                record = replace(record, config=config, run_id=new_run_id(config))
-            records.append(record)
-            print(f"Profile complete: {model.id} / {model.runtime}", flush=True)
-    if found != expected:
-        raise ValueError("compression matrix is missing expected recipes")
+    for descriptor in assets["variants"]:
+        model = from_dict(ModelVariant, descriptor["model"])
+        config = reference_experiment(
+            reference, model, from_dict(ArtifactIdentity, descriptor["artifact"]),
+            manifest, assets["manifest_path"], experiment=matrix.experiment,
+        )
+        records = groups.setdefault(model.runtime, [])
+        record = run_worker(config, manifest, workspace)
+        records.append(with_baseline(record, records[0] if records else None))
+        print(f"Profile complete: {model.id} / {model.runtime}", flush=True)
     paths = []
     for records in groups.values():
-        if records[0].config.model.compression.details is not None:
-            raise ValueError("compression group is missing its FP32 baseline")
         reports = render_reports(records)
         paths.extend(ResultStore(workspace).write(record, reports=reports) for record in records)
     print(
@@ -340,6 +290,7 @@ def validate_descriptors(
                 raise ValueError("FP32 baseline differs from the original verified reference")
             if model.runtime in baselines:
                 raise ValueError("duplicated FP32 baseline")
+            identity.verify(workspace)
             baselines.add(model.runtime)
             continue
         if details.recipe not in matrix.recipes or details.recipe.id in recipes:

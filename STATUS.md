@@ -1,492 +1,56 @@
-# Status
-
-## 2026-10-14 — Phase 4 INT8 diagnosis
-
-**State: authorized bounded CPU diagnosis completed; findings recorded. The
-deployment recipe is unchanged and Phase 5 remains pending review.**
-
-### Authorization and approach
-
-- The user authorized investigating the unexpected INT4/INT8 quality difference.
-  Recorded `docs/int8_diagnostic_plan.md` before implementation, then recorded
-  evidence-based component/isolation controls before expanding the diagnosis.
-- Added the standalone `scripts/diagnose_int8.py` CPU entry point. It validates
-  original/prepared identities, disjoint manifests and source parity; captures
-  hashes/host/Git/runtime/script provenance, and reserves a fresh ignored artifact
-  directory. Heavy dependencies remain lazy; at most 64 images per split.
-- Streamed per-image ORT QDQ matching into split-specific statistics, avoiding
-  retention of the entire activation dataset. ORT augmentation/temporary shape
-  inference operates on fresh copies, with output hashes and completion last.
-
-### Findings
-
-- Fixed twenty-image top-1: original FP32 14/20; classifier INT4 14/20;
-  INT8 rounding of those same classifier weights with FP32 execution 14/20;
-  original broad INT8 QDQ 1/20. Equal weight scope removes the apparent bit-width
-  paradox; the rounding control does not claim deployment INT8 kernels.
-- Numerical component controls retained 15/20 with weight/bias QDQ only and
-  0/20 with activation QDQ only, without refitting scales. Activation rounding
-  is sufficient to reproduce the quality collapse in this fixture.
-- Matched 103 activations per split and inspected 108 weight/bias constants.
-  The first major accumulated error occurs at the first depthwise Conv:
-  relative L2 about 0.449 after about 0.040 at its input.
-- An isolated Conv with original FP32 input/weights/bias and only input QDQ in
-  one copy produces about 0.290 relative L2 output error on both training
-  calibration and validation. Shared step 0.12048 loses small channel signals:
-  channel 7 RMS 0.03150, 93.68% newly rounded to zero, relative input error 0.930.
-- Largest matched weight relative error about 0.0145; first depthwise weight
-  error about 0.00409. These statistics support the component controls, without
-  assuming small weight errors alone guarantee model quality.
-- Wrote `docs/int8_diagnosis.md` with reproduction, controls, exact interpretations
-  and limitations; linked the follow-up from Phase 4 usage.
-
-### Verification
-
-- Final public diagnostic completed in new
-  `artifacts/compression_diagnostics/20261013T221657564220Z_33004012bd/`.
-  Verified output/source hashes, exact diagnostic script identity and completion.
-- Independent generated tests: **3 passed**, checking component isolation against
-  explicit arithmetic/runtime outputs, signed subtraction without overflow,
-  source preservation, zero-column rounding and nonfinite/shape refusal.
-- Full regression with public ordinary/sustained/compression smoke: **191 passed,
-  2 skipped** in 117.77 s. Skips are Windows directory-symlink permissions.
-- Ruff passed for source, tests and diagnostic script; Git whitespace checks passed.
-
-### Limits and next review
-
-- No production recipe correction, accuracy recovery target, training, calibration
-  search, pruning recovery, measured energy or hardware validation was performed.
-- Shared activation range/rounding sensitivity is established here; this does not
-  prove that ten calibration images are the sole cause or that more images fix it.
-  Twenty-image quality values remain bounded pipeline observations.
-- Existing INT8 is currently unsuitable as a quality-preserving controller option.
-  Review a separate recovery task (mixed precision/calibration strategy/quality
-  budget) or the Phase 5 architecture before further implementation. Keep 3B pending.
-
-## 2026-10-13 — Phase 4 CPU
-
-**State: authorized CPU compression tooling implemented and verified; ready for
-user review before Phase 5. Jetson/TensorRT acceptance remains pending in 3B.**
-
-### Authorization and architecture
-
-- The user accepted 3A and explicitly requested Phase 4. Recorded
-  `docs/phase_4_plan.md` before implementation and preserved the deferred 3B gate.
-- Implemented reusable compression tools and bounded reference validation only.
-  No training, quality tuning, research sweep, controllers or condition experiments.
-
-### Done
-
-- Added small typed compression recipes, actual coverage/zero/mask statistics,
-  source-artifact lineage, calibration manifest and observed CPU kernel evidence.
-- Added exclusive FP16 checkpoint conversion and PyTorch half model/input support;
-  verify floating state dtype, finite conversion and input-overflow refusal.
-- Added static signed per-channel INT8 QDQ with disjoint seeded/checksummed train
-  calibration, explicit MinMax settings and preprocessing parity checks.
-- Added symmetric RTN blockwise INT4 MatMulNBits weights, compatible Gemm-to-MatMul
-  normalization with FP32 parity, and direct constant-MatMul support. Coverage
-  remains partial and activations/Conv FP32 in the reference.
-- Added deterministic unstructured, output-channel and 2:4 masks for constant
-  Conv/Gemm/MatMul weights; retain bias, dense shapes/storage and nominal counts.
-  Record skipped tensors and actual target-weight sparsity, with no sparse CPU
-  kernel claim. Public ONNX transforms refuse external tensor references before
-  loading referenced data; sources and result paths remain confined.
-- Probe the exact quantized ONNX artifact, retain raw CPU profile, verify observed
-  operator event counts against metadata and match artifact/host/runtime evidence.
-  FP16 internal CPU arithmetic remains unknown. Profile-based support is partial,
-  not proof that all operations use low precision.
-- Added `compressed_checkpoint` role without relaxing original checkpoint hash
-  equality, and schema 4 for transformed records. Enforce artifact/recipe/calibration
-  identity, canonical source, actual mask counts and device/runtime evidence.
-  Continue reading schemas 1–3 without editing them.
-- Store compression metadata and a hashed raw kernel-profile copy before the run
-  completion marker. Extend private-source guards to lineage/calibration/profile
-  paths; all generated data, artifacts and results stay ignored.
-- Added typed YAML matrix and separate no-download prepare/run CLI, fresh CPU
-  workers, verified whole-matrix coverage/baselines before measurement, standard
-  immutable reports and compression-only baseline attribution.
-- Documented commands, exact method scopes and observed limitations; updated
-  roadmap, architecture and hardware acceptance requirements. Stop before Phase 5.
-
-### Verification
-
-- Final full suite with ordinary/sustained reference and public compression smoke:
-  **188 passed, 2 skipped** in 79.67 s. Skips are Windows directory-symlink permissions.
-- Core-only emulation blocking all optional inference/export/image/memory/plot/
-  hardware dependencies: **152 passed, 38 skipped** (expected optional fixtures,
-  three opt-in public matrices and symlink tests). Core import checks passed.
-- All six real transforms, two runtime baselines and eight public immutable runs
-  completed, with valid comparison groups, measured timing/memory, actual artifact
-  size and strictly estimated energy. First full compression CLI: **23.046 s**.
-- Generated fixtures exercise real FP16/INT8/INT4 inference, pure independent
-  mask/tie/axis cases, direct MatMul, shape/bias preservation, no overwrite,
-  calibration overlap refusal, kernel/hash/version/device errors, private lineage
-  rejection, external-data refusal, schema round-trips and archived profile copying.
-- An ORT `ModelProto` preprocessor call exposed an external-initializer parsing
-  error; use its file-path API with explicit settings. Retained failed preparation
-  and created a fresh exclusive directory. No dependency changes or downloads.
-- Independently verified FP32 preprocessing on all 20 public evaluation inputs:
-  identical logits in diagnostic check (max error 0) and identical top-1. Also
-  checked INT8 with optimizations disabled to investigate its poor fixture quality.
-- Ruff, installed dependency checks, local documentation links and Git whitespace
-  checks passed. Read generated reports and visually inspected a six-variant plot.
-- Actual previous schema-2/3 runs remained readable. Validation records honestly
-  captured the current implementation Git commit with dirty=True; old runs unchanged.
-
-### Known limitations and observations
-
-- In the initial fixed 20-image validation, FP32/FP16/INT4 top-1 was 70%; INT8 5%,
-  unstructured masks 40%, channel/2:4 masks 0%. These are fixture observations,
-  not research accuracy estimates or recommended deployment configurations.
-- FP16 reduced artifact size but was substantially slower on this CPU. Its dtype
-  does not establish native half arithmetic. INT4 is classifier weight-only;
-  quantized operator event counts aggregate probe inputs, not unique layers.
-- INT8's severe quality loss also occurred without graph optimization, while
-  preprocessing parity held. The precise quantization/calibration cause is open;
-  no saturation diagnosis, calibration search or fine-tuning is claimed.
-- Channel pruning is masking, not graph surgery or retraining. Dense parameters/
-  FLOPs and storage need not fall. All sparse runtime support is pending 3B.
-- No measured energy, savings, Jetson timing, TensorRT execution or hardware
-  efficiency is verified. Sensor/profile provenance and immutability rules persist.
-- Initial tools cover tensor state dicts and inline constant Conv2d/Gemm/MatMul
-  weights, not arbitrary architecture/operator coverage or a production quality gate.
-
-### Next step and open questions
-
-- Review Phase 4 CPU, then propose Phase 5 controller/streaming/switching-cost
-  architecture before implementation. Phases 5–6 are not implemented or authorized
-  automatically by this session.
-- A separately authorized task can investigate calibration/quality recovery and
-  accuracy budgets; the current small validation does not establish such a target.
-- Keep 3B pending device arrival; recapture the actual JetPack/L4T stack and verify
-  TensorRT precision/sparsity/quality, real switching costs and measured energy.
-- Distribution license remains an open question from earlier phases.
-
-## 2026-10-12 — Phase 3A
-
-**State: authorized hardware preparation implemented and verified; ready for
-user review before Phase 4 CPU work. Phase 3B remains pending hardware.**
-
-### Authorization and scope
-
-- The user accepted Phase 2 and requested 3A after discussing the device purchase
-  in about three months. Recorded the architecture before implementing it.
-- Amended specification section 13 to split 3A preparation from 3B hardware work.
-  CPU/mock portions of 4–6 may proceed through their own proposals and reviews
-  while 3B remains pending; this session implements 3A only.
-- Added `docs/phase_3a_plan.md`, usage and CPU/hardware roadmap; updated architecture,
-  measurement and hardware documentation with an explicit device acceptance gate.
-
-### Done
-
-- Added standard-library offline tegrastats parsing for documented RAM, CPU/GPU,
-  temperature and instantaneous/average rail fields; preserve raw lines/units,
-  optional observations and reject malformed/duplicate supported fields.
-- Added typed timestamped replay with explicit source/rail/cadence, missing-rail
-  and irregular/gap refusal, and instantaneous mW-to-W conversion. Replay always
-  has synthetic clocks and unmeasured power; it does not replace host observations
-  or provide a power source synchronized with a new CPU run.
-- Added sustained CPU profiling: warm up once, repeat complete passes, stop at
-  duration or bounded inference count, score incrementally, and clean up on errors.
-  Actual duration/count, complete passes, target/cap outcome and descriptive
-  equal-count end-to-end latency windows are derived from raw traces.
-- Added schema 3 only for sustained records, actual timing/energy count checks,
-  recomputed summary validation, observed-clock requirements and synthetic-source
-  measurement rejection. Schema-1/2 results remain readable without edits.
-- Store sustained summaries and all reports before completion; no old run is
-  extended. Reports show targets/actuals/stop reasons and repeated-subset quality;
-  differing profiling protocols require a visible comparison override.
-- Added explicit reference CLI duration/cap overrides after verifying prepared
-  assets; save overrides in resolved config, cycle verified manifest indices,
-  account for duration in worker timeouts and retain old preparation compatibility.
-
-### Verification
-
-- Full suite with both original and sustained public reference matrices:
-  **159 passed, 2 skipped** in 51.94 s. Skips are Windows directory-symlink permissions.
-- Core-only emulation with all optional CPU/export/image/memory/plot/hardware
-  dependencies blocked: **143 passed, 18 skipped**, expected optional fixtures,
-  two opt-in reference matrices and symlink tests. Core import checks also passed.
-- Both CPU backends and both pretrained sizes reached the explicit two-second
-  sustained target in full 20-image passes; every stored record/group validated,
-  with actual count-based energy estimates and all immutable output artifacts.
-  This short check validates the mode, not minute-scale thermal behavior.
-- Verified reading an actual previous Phase 2 immutable result and its unchanged
-  prepared assets. Offline tests also remove new fields to check schema-2 defaults.
-- Parser tests cover units/formats/optional fields/duplicates/malformed values;
-  replay tests cover selected rails, timestamps/gaps and provenance. Fake clocks
-  cover duration/cap stops, warm-up, counts, scoring and failure cleanup.
-- Ruff, installed dependency consistency, local documentation links and Git
-  whitespace checks passed. Inspected a generated sustained Markdown report.
-- Public assets and generated results remain ignored; validation records honestly
-  captured the implementation Git commit with dirty=True.
-
-### Known limitations
-
-- No Jetson device profile, live onboard power/temperature source, TensorRT backend
-  or on-device command is implemented or verified. Phase 3 is not fully complete.
-- Parser coverage follows documented examples, not a capture from the future
-  device. Replay cadence tolerance is 1%; real sensors need observed timestamps
-  and a reviewed gap policy in 3B. Rail coverage is not yet device-validated.
-- Sustained mode is available for longer requested trials, but this session ran
-  only short validation. Complete-pass overshoot is possible; cap stops before
-  target are explicit. Trace memory/storage grows with bounded run length/count.
-- Latency drift is descriptive CPU behavior, with no thermal attribution. Repeated
-  images do not enlarge the evaluation dataset. All power/energy remain synthetic
-  estimates; no Jetson performance prediction or measured energy savings.
-- Compression transforms, controllers and perturbation implementations remain
-  in phases 4–6. No research experiment or calibrated device simulator was added.
-
-### Next step and deferred gate
-
-- Review 3A, then propose Phase 4 CPU compression architecture before implementation.
-- Keep separate CPU acceptance and pending Jetson validation for phases 4–6.
-  3B can begin whenever hardware becomes available, without waiting for Phase 6.
-- Capture actual JetPack/L4T before selecting hardware dependencies; review and
-  implement the 3B acceptance gate in `docs/hardware_setup.md` after device arrival.
-- Repository distribution license remains an open question.
-
-## 2026-10-12 — Phase 2
-
-**State: approved CPU/reference plan implemented and verified; ready for user
-review before Phase 3.**
-
-### Authorization and scope
-
-- The user explicitly approved `docs/phase_2_plan.md` and requested continuation.
-- Implemented CPU runtimes, profiling, reporting and the reference pipeline only.
-  Hardware support, compression transforms, controllers and condition experiments
-  remain in their later phases; the authoritative specification is unchanged.
-
-### Done
-
-- Added lazy PyTorch/ONNX Runtime CPU adapters with native input preparation,
-  explicit thread/provider settings, warm-up, synchronization contract and release.
-- Added offline verified model loading, exclusive ONNX export, export identities,
-  shared partial Conv2d/Linear FLOP accounting and full parameter counts.
-- Added typed reference config, deterministic stratified Imagenette selection,
-  checked ImageNet-1K labels, shared Pillow/NumPy preprocessing and image hashes.
-- Added separate bounded/checksummed public preparation and no-download benchmark
-  commands; matching caches are verified and failed preparations never overwritten.
-- Added serial model/end-to-end timing, correct scoped throughput, sampled native
-  process RSS, observed-window synthetic active/idle power and energy estimates.
-- Added schema version 2 for execution/data/artifact/RSS/idle provenance while
-  preserving reading of version 1 files without rewriting them.
-- Added concise Markdown/full CSV tables and headless Pareto plots, visible
-  mismatch overrides, semantic model/runtime baseline attribution, private-path
-  checks and comparison-group completeness validation.
-- Reports are prepared before exclusive result storage and written before the
-  completion marker; no completed run directory is extended or overwritten.
-- Added offline adapter, profiler/cleanup, manifest/extraction, report/privacy,
-  compatibility and opt-in full public smoke tests; documented usage and versions.
-
-### Verification
-
-- Full CPU suite with prepared public smoke: **112 passed, 2 skipped** (Windows
-  denied directory symlink creation). No hardware was required.
-- Core-only emulation blocking optional inference/export/image/memory/plot imports:
-  **99 passed, 15 skipped** (optional CPU fixtures, opt-in smoke and symlink tests).
-- The first four-worker public CLI completed in **16.795 seconds**, including
-  startup, loading, preprocessing, warm-up, inference, reporting and storage.
-  The opt-in test independently passed the approximately two-minute budget and
-  validated all four complete records/groups.
-- Both exported models passed full-logit checks and identical top-1 predictions
-  on all 20 selected images. Recorded tolerance: rtol=1e-4, atol=5e-5; actual max
-  absolute errors: Small 4.63e-5, Large 1.83e-5. The initial atol=1e-5 rejected
-  one near-zero difference of 1.78e-5; the change is explicit in export metadata.
-- Verified pinned PyTorch 2.9.1+cpu/Torchvision 0.24.1+cpu and ONNX exporter stack
-  on Python 3.10.11 Windows; ONNX IR 1.0 incompatibility resolved with 0.1.12.
-- Ruff, dependency checks, editable package installation, local documentation
-  links and Git whitespace checks passed. Visually inspected a generated plot.
-- Assets and generated immutable runs remain ignored; none will be committed.
-  Validation runs captured Git dirty=True honestly while implementation was pending.
-
-### Known limitations
-
-- Real reference adapters currently cover FP32 MobileNetV3 classification, batch 1,
-  a small Imagenette validation subset and CPU execution. No Jetson/thermal/sustained
-  run, quantization, pruning, controller or perturbation implementation yet.
-- Synthetic watts/energy validate plumbing only; no measured energy or savings.
-  Download/export setup is outside the prepared benchmark's two-minute budget.
-- FLOPs are partial Conv2d/Linear accounting with explicit exclusions; RSS is a
-  sampled process peak including libraries/runtime and may miss transient peaks.
-- Storage is immutable through the API, not filesystem write protection. Private
-  remote-source classification remains the caller's responsibility.
-- The exact tested CPU dependency stack is pinned; other OS/Python combinations
-  are not claimed verified. Version remains unreleased development `0.0.0`.
-
-### Open questions / next phase
-
-- Review Phase 2 before authorizing Phase 3.
-- Choose a repository distribution license; no asset redistribution is implied.
-- Capture the Jetson's installed JetPack/L4T stack before hardware compatibility
-  decisions, then propose Phase 3 device/power/thermal/TensorRT architecture.
-
-## 2026-10-11 — Phase 2 planning
-
-**State: Phase 1 accepted for the next planning step; Phase 2 proposal prepared
-for review. Implementation has not started.**
-
-### Done
-
-- The user agreed to the proposed next step: prepare a Phase 2 plan before
-  implementation. Re-read the specification, status, architecture and core APIs.
-- Confirmed Phase 1 commit `a68189e` is on `main`/`origin/main`, with a clean
-  working tree before preparing this proposal.
-- Wrote `docs/phase_2_plan.md`: CPU runtime/export contracts, timing and RSS
-  boundaries, provenance/schema evolution, immutable reporting and validation gates.
-- Proposed MobileNetV3 Small/Large FP32 V1 weights with a seeded 20-image
-  Imagenette validation subset and both PyTorch/ONNX Runtime CPU backends.
-- Checked current primary documentation for weight preprocessing, dataset mapping,
-  ONNX export and ORT CPU/session settings. Kept exact dependency pins pending
-  compatibility checks during implementation.
-- Identified two integration requirements: power estimates must cover the observed
-  run window, and report files must be written before completion to preserve
-  immutable results. Recorded solutions in the proposal.
-
-### Verification
-
-- Inspected implemented Phase 1 contracts against the proposed extension points.
-- Confirmed local Python 3.10.11 and absence of all optional Phase 2 libraries.
-- Checked documentation links and Git whitespace for the documentation change.
-- No runtime code/config/test changes, dependency installations, asset downloads
-  or benchmark executions in this planning session.
-
-### Open questions / review
-
-- Review the proposed model/data choice, timing boundaries, schema version 2 and
-  prepared-asset smoke definition before implementation.
-- Exact compatible Python 3.10 Windows CPU dependency versions remain to verify.
-- The approximately two-minute smoke target is an acceptance requirement, not
-  verified performance; first downloads/export are separate setup work.
-- Repository distribution license and future JetPack/L4T observations remain open.
-
-### Next step
-
-Implement the reviewed Phase 2 proposal, run both offline CPU tests and the actual
-prepared public reference smoke, then stop before Phase 3.
-
-## 2026-10-11 — Phase 1
-
-**State: architecture reviewed and core implemented; awaiting user review before
-Phase 2.**
-
-### Authorization and architecture review
-
-- The user requested both the architecture review and Phase 1 implementation in
-  one session. Reviewed the proposal against the authoritative specification;
-  no structural conflict was found. Recorded concrete core decisions in
-  `docs/research_framework.md` before implementation.
-- Kept controllers, perturbation transforms, real runtimes/profiling, hardware
-  support, compression transformations and reference experiments in later phases.
-
-### Done
-
-- Added strict typed configs and metadata for models, compression, workloads,
-  conditions and measurement protocol; finite JSON conversion and schema versioning.
-- Added safe YAML loading, confined fragment references, explicit overrides,
-  unknown-field/duplicate-key rejection and private-fragment classification.
-- Added automatic CPU device observations, installed-package metadata and Git
-  commit/dirty-state capture without importing heavy optional packages.
-- Added runtime/power protocols and deterministic CPU-only mocks with explicit
-  representative warm-up batches and synthetic power/timing provenance.
-- Added raw timing/power schemas, bounded single-rail trapezoidal integration,
-  total/window-average energy metadata and measured-versus-estimated enforcement.
-- Added complete `RunRecord` validation and exclusive public/private result
-  storage, failure/completion markers, standard artifacts and validated reads.
-- Added comparison guards with visible mismatch overrides, nominal/sparsity
-  descriptors and validation of declared changes against an available baseline.
-- Added CPU/mock tests, mock YAML contract fixtures, core API usage documentation,
-  updated setup instructions and installed local development dependencies in `.venv`.
-- Prepared Phase 1 for a local Git commit at the user's request; Phase 2 remains
-  outside this work session.
-
-### Verification
-
-- Python 3.10 CPU suite: 84 passed; 2 symlink tests skipped because Windows denied
-  directory symlink creation. Tests include concurrent/failed writes, private
-  routing, schema/config rejection, analytic energy and provenance checks.
-- Ruff checks passed for `src` and `tests`; Git whitespace checks passed.
-- All core modules imported in a subprocess that explicitly blocks PyTorch,
-  ONNX/ONNX Runtime, TensorRT, CUDA, OpenCV, jtop, NumPy, matplotlib and PyYAML.
-- Reinstalled the editable package with its declared PyYAML dependency;
-  `pip check` passed and the documented core API example executed successfully.
-- Specification unchanged; no weights/datasets downloaded or public measurement
-  runs created. All test records are synthetic fixtures in temporary directories.
-
-### Open questions
-
-- Review Phase 1 before authorizing Phase 2.
-- Choose a distribution license; none has been selected or implied.
-- Select the public pretrained model family and workload for Phase 2.
-- Capture installed JetPack/L4T before Phase 3 compatibility choices.
-
-### Known limitations
-
-- No real inference backend, profiling runner, reference experiment, rendered
-  report/Pareto plot, controller or perturbation transformation yet.
-- Mock power is an independently generated synthetic trace, not a measurement of
-  time spent executing mock inference. No energy savings are claimed.
-- Warm-up metadata and mock accounting are validated; actual timing exclusion and
-  synchronization await the Phase 2 profiler.
-- Unknown CPU-host hardware settings carry reasons; requested settings are not
-  applied. Sensor loss is rejected during integration until a gap policy exists.
-- Storage immutability is enforced by the API, not filesystem write protection.
-  Source privacy classification remains the caller's responsibility for remote
-  identifiers; known private paths/fragments are checked automatically.
-- Baseline attribution is independently checked only when the referenced baseline
-  is included in the comparison. The development version remains `0.0.0`.
-
-### Next phase (after review)
-
-Phase 2: PyTorch/ONNX Runtime CPU backends, actual timing/warm-up exclusion,
-memory profiling, rendered reports/Pareto plots and the public reference pipeline.
-
-## 2026-10-10 — Phase 0
-
-**State: architecture proposal complete; awaiting review before Phase 1.**
-
-### Done
-
-- Read the development specification and preserved it unchanged.
-- Proposed module responsibilities, interfaces, dependency plan, storage rules,
-  measurement boundaries and staged verification in `docs/research_framework.md`.
-- Created the `src/edge_ai` package skeleton and all specified subsystem directories.
-- Added config, reference experiment, script, test and public-result scaffolding.
-- Added package metadata, development tool settings, README and agent instructions.
-- Added Git ignore/line-ending rules, including complete private-tree exclusion.
-- Added draft profiling, scope and hardware setup documents with implementation
-  status made explicit.
-- Configured local `main` and `origin` pointing to `https://github.com/jaworekk85/EdgeAI.git`.
-
-### Verification
-
-- Parsed `pyproject.toml` and verified metadata and version consistency.
-- Parsed Python source and imported all 15 package/subsystem modules on Python 3.10
-  without installing PyTorch, CUDA, TensorRT or other runtime dependencies.
-- Verified package discovery and the required source/config directory layout.
-- Verified ignore rules for private configs/results, generated public runs, secrets
-  and model artifacts; scaffold documentation and config placeholders remain tracked.
-- Checked local documentation links and staged changes for whitespace errors.
-- Initialized the local Git repository on `main`; the existing GitHub repository
-  `jaworekk85/EdgeAI` was confirmed empty before preparing the initial commit.
-
-### Open questions
-
-- Choose a license before distributing/reusing under defined license terms.
-- Review the architecture before authorizing Phase 1 implementation.
-- Select the public reference workload in Phase 2.
-- Capture the installed JetPack/L4T stack before Phase 3 package compatibility choices.
-
-### Known limitations
-
-- No runtime, configuration loader, record validator, measurement, reporting,
-  controller, compression tooling or experiment implementation yet.
-- No test suite yet. CPU/mock scientific-invariant tests begin in Phase 1.
-- Heavy optional dependencies and runtime environment pins are intentionally deferred.
-- The package version `0.0.0` denotes the scaffold, not a research-capable release.
-
-### Next phase (after review)
-
-Phase 1: typed configs/dataclasses, record schema/validation, immutable/private result
-store, provenance capture, mock runtime/power, comparison validation and CPU tests.
+# Current status
+
+Updated 2026-10-15. **Phase 4 CPU tooling and INT8 diagnosis are implemented.
+Maintenance is complete and verified; Phase 5 and INT8 recovery await review.**
+[Documentation index](docs/README.md) · [Code map](docs/research_framework.md) ·
+[Decisions/history](docs/history.md).
+
+## Implemented
+
+- Typed configs/metadata, provenance, immutable/private results and guarded reports.
+- PyTorch/ONNX Runtime CPU inference, real timing, sampled RSS and classification.
+- Sustained CPU profiling and offline tegrastats parsing/replay.
+- FP16, calibrated INT8, classifier weight-only INT4 and dense pruning masks.
+- Bounded INT8 diagnostics with retained identities, controls and split statistics.
+
+## Current maintenance
+
+Authorized: simplify code and Markdown before further phase work. The plan was
+recorded before implementation and is summarized in history.
+
+- Both CPU paths share experiment construction, isolated workers and baseline
+  attribution. Benchmarking and diagnostics share prepared-compression validation.
+- Removed repeated orchestration checks; simplified diagnostic aggregation while
+  retaining its controls, output meaning, lazy imports and exclusive writes.
+- Replaced the long session log and completed standalone plans with concise history
+  and fixed Git links to the originals. Added one documentation index and code map.
+- Full regression with ordinary/sustained reference and compression smoke:
+  **191 passed, 2 Windows symlink skips**, 113.73 s. Focused checks also passed.
+- Fresh diagnostic predictions/settings match the previous evidence exactly;
+  all tensor/channel statistics agree within `1e-12`. Old/new hashes verified.
+- Corrupt-baseline probe rejected before workers; old schema-2/3 runs remain
+  readable. Ruff, local links, historical Git targets and whitespace checks passed.
+
+## Known limits
+
+- Existing INT8 gives 1/20 correct versus FP32/FP16/INT4 14/20 on the fixed fixture.
+  Activation QDQ alone reproduces the collapse; coarse shared steps erase small
+  channels. [Diagnosis](docs/int8_diagnosis.md) is complete; no corrected recipe yet.
+- Pruning fixture quality also fell: unstructured 8/20, channel/2:4 0/20. These
+  twenty-image observations are pipeline checks, not general accuracy estimates.
+- FP16 is slower on this CPU; internal arithmetic is unverified. INT4 covers
+  classifier weights; pruning masks retain dense shapes/storage and nominal FLOPs.
+- All CPU power/replay energy is estimated. No Jetson performance, TensorRT
+  compatibility, sparse acceleration or measured device energy is established.
+- Controllers/streaming and perturbation transforms remain unimplemented.
+  Distribution license is still undecided.
+
+## Next review and deferred device work
+
+Review maintenance, then choose a separate INT8 recovery task (quality budget and
+mixed-precision/calibration approach) or propose Phase 5 controller architecture.
+Neither is authorized by this cleanup.
+
+Phase 3B awaits hardware: observe the actual JetPack/L4T stack, review its design
+and execute the [hardware acceptance gate](docs/hardware_setup.md).
+CPU parts of 5–6 may proceed through their own reviews while 3B remains pending.

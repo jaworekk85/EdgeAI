@@ -2,7 +2,7 @@
 
 Use the tested Phase 2 dependencies and prepared assets from
 [CPU reference setup](cpu_reference.md). No Jetson, CUDA, TensorRT, extra package
-installation or new asset download is needed. See [design](phase_3a_plan.md) and
+installation or new asset download is needed. See [design history](history.md) and
 [CPU/hardware roadmap](cpu_hardware_roadmap.md).
 
 ## Sustained CPU validation

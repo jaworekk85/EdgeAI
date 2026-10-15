@@ -1,217 +1,68 @@
-# Proposed research architecture — Phase 0
+# Code map and execution flow
 
-Status: Phase 0 reviewed against the specification on 2026-10-11; the user
-authorized the review and Phase 1 implementation together. The development
-specification remains authoritative. The phase table distinguishes implemented
-core contracts from planned later backends and experiments.
+This describes the current implementation. The
+[specification](../EDGE_AI_AGENT_RESEARCH_SPEC.md) is authoritative; see
+[status](../STATUS.md) for open work and [history](history.md) for design decisions.
 
-The [approved Phase 2 design](phase_2_plan.md) specifies the implemented CPU runtime
-and reference pipeline. See [CPU usage](cpu_reference.md) for tested commands.
-The [Phase 3A design](phase_3a_plan.md) adds sustained CPU profiling and offline
-telemetry preparation. The [CPU/hardware roadmap](cpu_hardware_roadmap.md) permits
-separately reviewed CPU portions of 4–6 while 3B device validation remains pending.
-The [Phase 4 design](phase_4_plan.md) and [compression usage](phase_4_usage.md)
-describe CPU transforms, lineage, calibration isolation and observed kernel evidence.
+## Where to change things
 
-## Module responsibilities and implementation phases
+Paths below are relative to `src/edge_ai/`.
 
-| Module | Responsibility | First implementation |
-| --- | --- | --- |
-| `models` | Serializable `ModelVariant`; model families and weights identity | 1 (metadata), 2 (model loading) |
-| `compression` | `CompressionSpec`, shared parameter/FLOP accounting; transformations | 1 (metadata), 4 (tooling) |
-| `export` | Explicit ONNX / optional TensorRT artifact export | 2 / 3B |
-| `runtimes` | `RuntimeBackend` contract, mock, PyTorch, ONNX Runtime, TensorRT | 1 / 2 / 3B |
-| `profiling` | Warm-up, synchronized timing, memory, steady-state/sustained runs | 2 / 3A CPU / 3B device |
-| `power` | `PowerSource`, `PowerTrace`, mock, integration, replay, device-specific sources | 1 / 3A replay / 3B live |
-| `devices` | Automatic CPU profile, offline telemetry parsing, Jetson profile capture | 1 / 3A parser / 3B profile |
-| `datasets` | `Workload` metadata, repeatable input sources and dataset subsets | 1 / 2 |
-| `conditions` | `Condition` descriptions, seeded transforms and streaming schedules | 1 (metadata), 6 (transforms) |
-| `controllers` | Selection/update contract, baselines and switching-cost accounting | 5 |
-| `evaluation` | One task-quality evaluation interface, outside model-only timings | 2 |
-| `records` | `RunRecord`, validation, immutable store and privacy routing | 1 |
-| `reporting` | Comparable-run checks, tables and Pareto plots | 1 (checks), 2 (outputs) |
-| `utils` | Small shared helpers such as provenance and deterministic seeding | 1 |
+| Area | Files / responsibility |
+| --- | --- |
+| Configuration | `config.py`, `utils/serialization.py`: typed YAML/JSON, strict validation |
+| Models and data | `models/`, `datasets/`: model identity/loading, image manifests and preprocessing |
+| Export | `export/onnx.py`: exclusive ONNX export and FP32 output parity |
+| Compression | `compression/recipe.py`, `spec.py`, `accounting.py`: recipes, evidence and nominal counts; `quantization.py`, `pruning.py`: transforms; `verification.py`: artifact/profile checks |
+| CPU entry points | `reference.py`: original preparation, shared experiment construction, isolated workers and baseline attribution; `compression/reference.py`: compression preparation and shared prepared-matrix validation |
+| Execution | `runtimes/`: small backend protocol, mock, PyTorch and ORT adapters |
+| Measurement | `profiling/`: warm-up, timing scopes, RSS, sustained summaries; `power/`: synthetic sources, trace integration and replay |
+| Device observations | `devices/`: host identity and offline tegrastats parser |
+| Quality and output | `evaluation/`, `reporting/`: classification metrics, guarded comparisons, tables and plots; `records/`: schemas and immutable storage |
+| Future work | `controllers/` is a placeholder; `conditions/` has metadata only, no perturbation transforms |
 
-Training is separate from export and measurement. The initial scope does not add
-a training subsystem. Future training tools can emit checkpoints consumed by
-`models` and `export` without becoming a dependency of profiling or runtimes.
+Outside the library: `scripts/diagnose_int8.py` contains the bounded numerical
+diagnosis, `configs/` the YAML inputs, and `tests/` invariant checks and CPU fixtures.
+Weights/data/prepared artifacts live in ignored `artifacts/` and `data/`.
+Generated public runs use `results/`; private inputs/adapters/results use `private/`.
 
-## Data objects
-
-Use standard-library dataclasses, enums and explicit validators. Nested objects
-serialize to ordinary JSON/YAML values. Configuration loading will reject unknown
-keys and validate values before loading a model. Introduce no factory/registry
-framework. Construct the initial mock runtime explicitly; add a small backend
-dispatch only when multiple implementations exist.
-
-- `ModelVariant`: stable ID, architecture/family, task, weights source and digest,
-  precision, compression, input shape/resolution and runtime.
-- `CompressionSpec`: method, calibration/precision metadata, sparsity level and
-  pattern, kernel support with detection/declaration provenance, nominal parameters
-  and FLOPs from one shared accounting utility. Unknown values remain explicit.
-- `DeviceProfile`: automatically captured identity, memory, OS, device software,
-  power mode, clocks, fan state, Python and relevant package versions. Unsupported
-  observations are `null` with a reason, never guessed or manually entered facts.
-- `Workload`: task, source, split/subset, rate, resolution, batch size, conditions,
-  optional latency constraint and public/private classification.
-- `Condition`: transform kind, parameters, seed and optional time schedule.
-- `PowerTrace`: source metadata (`measured`, sampling rate, rails, resolution),
-  monotonic timestamps and power samples with units and missing-sample metadata.
-- `RunRecord`: schema version, run identity, provenance, resolved config, seed,
-  model/compression/workload/device metadata, protocol, raw traces, quality and
-  metric summaries, plus baseline identity and changed components.
-
-Unknown quality, power or memory values use `null`, not zero. Nominal compute
-metrics state input shape and counting method so FLOP conventions stay visible.
-
-## Proposed runtime and power contracts
-
-`RuntimeBackend` is a small typing protocol, not an inheritance hierarchy:
+## Ordinary and compression runs
 
 ```text
-load(variant: ModelVariant) -> None
-warmup(n: int) -> None
-infer(batch) -> inference output
-memory_report() -> memory summary with provenance
-release() -> None
+config + verified prepared assets
+  -> resolve ExperimentConfig for each model/runtime
+  -> fresh worker process captures provenance and host
+  -> runtime load -> warm-up -> idle baseline -> timed inference
+  -> quality + validated RunRecord
+  -> baseline attribution -> prepare group reports
+  -> exclusive ResultStore write -> complete.json last
 ```
 
-Warm-up repeats a representative batch bound during setup. Phase 1 must make that
-binding explicit in the mock contract; inference inputs/outputs remain task-aware.
-Device synchronization lives in its runtime backend so timing boundaries include
-completed computation. Resource release must also run after failed inference.
+Preparation/download/export is separate from measurement. Both CPU CLIs share
+`reference_experiment`, `run_worker` and `with_baseline`; they differ in model
+selection and comparison grouping. Compression benchmarking and diagnosis share
+`load_compression_prepared`, which verifies source identity, config, manifest,
+recipe coverage, lineage and kernel evidence before executing work.
 
-`PowerSource` declares `measured`, `sampling_hz`, `rails` and `resolution`:
+Runtime implementations expose load, native batch preparation, representative-batch
+binding, warm-up, synchronization, inference and release. Optional libraries are
+imported inside the relevant operations. Training, hardware collection and model
+selection do not belong inside the profiling loop.
 
-```text
-start() -> None
-stop() -> PowerTrace
-```
+## Contracts to preserve
 
-The mock returns a deterministic synthetic trace marked `measured=False`.
-Jetson tooling lives in dedicated modules under `devices` and `power`, with lazy
-imports. A later external meter implements the same contract with a documented
-sampling clock and measurement boundary. No hardware imports in package roots.
+- Typed metadata belongs to its subsystem. Prefer explicit functions/dataclasses
+  to registries, inheritance layers or generic pipeline frameworks.
+- Canonical pretrained checkpoint identity is separate from derived deployment
+  artifact hashes. A runtime/precision change must retain its correct attribution.
+- Record schemas 1–4 remain readable; 2 adds real CPU provenance, 3 sustained runs,
+  4 transformed-model evidence. Never rewrite old runs or append reports to them.
+- Device observations are captured, never inferred from requested settings.
+  Unknown values remain unavailable with reasons.
+- No measured energy without measured power. Replay and CPU mock watts always
+  produce estimates. Detailed timing/energy semantics live in the
+  [profiling protocol](profiling_protocol.md).
+- Public paths are confined; private lineage cannot enter public output. Validate
+  before reserving output and preserve incomplete runs on failure.
 
-`Controller` (Phase 5): `select(context) -> action`, `update(feedback) -> None`.
-Context includes confidence/difficulty, resource/thermal/energy state and previous
-action. Actions choose a declared model variant, precision and resolution. Runtime
-execution records residency, loading/context-switch duration and energy separately.
-Begin with static, offline oracle and threshold baselines; no RL implementation.
-
-## Configuration and execution flow
-
-YAML fragments live under the six directories in `configs`. A future experiment
-entry point resolves selected fragments into a typed config, saves that full
-config and never relies on implicit machine-specific defaults. Paths to public
-config fragments are relative to the project/config root; private fragments are
-loaded only from the private tree. Overrides become part of the resolved config.
-
-```text
-resolve and validate config -> capture provenance/device -> prepare workload
--> load runtime -> warm-up -> idle baseline -> timed measurement/power window
--> evaluate quality -> validate RunRecord -> write immutable outputs -> report
-```
-
-Model-only timing excludes input preparation and quality evaluation. End-to-end
-timing has separate boundaries, includes pipeline overhead and uses a separate
-FPS field. Raw per-inference timings and trace windows make each summary auditable.
-The reference experiment validates plumbing and is never presented as research.
-
-## Storage and scientific invariants
-
-Reserve a fresh directory with an exclusive create operation:
-`results/<experiment>/<UTC timestamp>_<short-hash>/`. Never reuse or overwrite it.
-Private runs use `private/results/...`; explicit private classification is checked
-before reserving any public output. Failed runs retain an explicit incomplete
-status and are excluded from completed-run comparisons.
-
-Standard outputs: `config.yaml`, `device.json`, `metrics.json`, `traces/`, `plots/`.
-The validated `RunRecord` is serialized in `metrics.json`; raw traces are embedded
-in this self-contained record and mirrored in relative `traces/*.json` files with
-units/source metadata. Capture git commit and dirty flag,
-runtime versions, model identity and protocol before measurement.
-
-Validation will enforce:
-
-1. `energy_j` requires a measured source, positive `sampling_hz` and an
-   `integration_method`; synthetic/estimated values use `energy_estimate_j` and
-   mandatory `estimate_method`. Neither field silently substitutes for the other.
-2. Comparisons refuse mismatched resolution, power mode, batch size or runtime.
-   `allow_mismatch=True` explicitly prints the differing settings in outputs.
-3. Pruned models report sparsity pattern and kernel support, including an explicit
-   label for pruning without runtime kernel support. Unknown support stays unknown.
-4. Tables show nominal parameters/FLOPs alongside real latency and energy, with
-   clear measured/estimated labels and unavailable fields where necessary.
-5. Baseline comparisons declare changes in model, compression, runtime or device
-   settings so gains are attributed to the correct component.
-6. Partner-specific runs never write under public `results/`.
-
-Energy integration uses timestamped traces over an explicit window. Low-rate
-onboard sources use mean power times steady-state duration divided by inference
-count for average inference energy; record idle power separately for total and
-above-idle results. Do not suggest per-inference sensor resolution when absent.
-
-## Dependency plan
-
-| Layer | Dependency | Planned introduction |
-| --- | --- | --- |
-| Build | setuptools; `build` for packaging checks | 0 |
-| Core | Python standard library, PyYAML for config I/O | 1 |
-| Development | pytest, Ruff | 0 (configuration), 1 (tests) |
-| CPU inference | Optional PyTorch, ONNX and CPU ONNX Runtime extras | 2 |
-| Workloads | Optional OpenCV for image/video paths | 2 |
-| Plots | Optional matplotlib reporting extra | 2 |
-| Jetson | Platform-provided CUDA/cuDNN/TensorRT; optional onboard tooling | 3 |
-| Compression | Backend-specific tools only when needed | 4 |
-
-Phase 1 adds PyYAML to the core dependencies and CPU/mock tests. Defer hardware extras
-and exact backend pins until compatible device software is known. Runtime versions
-are captured per run; reproducible CPU and Jetson environments will be documented
-separately. No Hydra, ROS2 dependency or plugin registry in the initial framework.
-
-## Verification plan
-
-Phase 0: validate packaging metadata, imports, syntax, whitespace, directory layout
-and ignore rules. Do not add a fake experiment or placeholder passing test suite.
-
-Phase 1 tests must cover schema validation (especially energy provenance), immutable
-result directories, private output routing, mismatch refusal and visible overrides,
-synthetic trace integration, config validation, deterministic mock behavior and
-provenance capture. Phase 2 adds warm-up exclusion, runtime cleanup, CPU reference
-smoke run under approximately two minutes and reporting. Phase 5 adds controller
-contract tests with mock variants; Phase 6 adds seeded perturbation tests.
-
-Hardware tests are marked `jetson` and skipped when hardware is absent. Every
-optional backend must have import tests proving its absence does not break core.
-
-## Review questions
-
-- Which distribution license should be used? No license is implied by this scaffold.
-- Which public model family/dataset should the Phase 2 reference use? Defer this
-  choice; do not download weights/data or create research experiments in Phase 0.
-- What JetPack/L4T installation is on the initial device? Capture it in Phase 3
-  before selecting compatible hardware packages.
-
-## Phase 1 implementation decisions (2026-10-11)
-
-- Keep metadata in each owning subsystem, with standard-library dataclasses and
-  shared strict JSON conversion; reject unknown fields, invalid types, nonfinite
-  quantities and unsupported schema versions.
-- Use PyYAML only for config I/O. Resolve explicit fragment references within the
-  config root, then apply explicit overrides and save the complete resolved config.
-  Private fragments require private workload classification; private paths and
-  results are confined to the workspace private tree.
-- Capture the CPU host profile and Git/runtime provenance automatically. Missing
-  Git metadata is an error; unavailable hardware settings carry explicit reasons.
-- Bind a representative batch explicitly in the mock runtime. Mock power produces
-  deterministic timestamped samples and always declares synthetic provenance.
-- Integrate one explicitly selected power rail over a bounded window using the
-  trapezoidal rule. Store total energy and optional steady-window per-inference
-  energy with their methods; keep idle power separate.
-- Validate the complete record before reserving an exclusive directory. Write an
-  incomplete marker first and a completion marker last. Comparison reads accept
-  only completed records, and visible override output lists setting mismatches.
-- Phase 1 implements comparison checks and nominal/sparsity report descriptors;
-  plots, profiling, real models, controllers and perturbations retain their later
-  phase boundaries. No weights, datasets or research experiments are downloaded.
+Current APIs and commands are in the [documentation index](README.md).

@@ -1,6 +1,6 @@
 # CPU/mock tests
 
-Run `python -m pytest -q` and `python -m ruff check src tests` from the repository
+Run `python -m pytest tests -q` and `python -m ruff check src tests scripts` from the repository
 after installing `.[dev]`. Tests need no Jetson or accelerator libraries. Default
 tests use generated fixtures in temporary directories; the opt-in public smoke
 uses separately prepared pretrained assets and writes new ignored result directories.

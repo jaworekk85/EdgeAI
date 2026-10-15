@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from statistics import mean
 
-from edge_ai.compression.reference import CompressionReferenceConfig, validate_descriptors
+from edge_ai.compression.reference import load_compression_prepared
 from edge_ai.compression.verification import (
     load_inline_onnx,
     reserve_directory,
@@ -16,10 +17,9 @@ from edge_ai.compression.verification import (
 from edge_ai.datasets.manifest import DatasetManifest
 from edge_ai.devices.profile import capture_device_profile
 from edge_ai.records.store import new_run_id
-from edge_ai.reference import load_prepared, load_reference_config
 from edge_ai.utils.artifacts import ArtifactIdentity, sha256_file, workspace_file
 from edge_ai.utils.provenance import capture_provenance
-from edge_ai.utils.serialization import from_dict, to_dict
+from edge_ai.utils.serialization import from_dict
 
 
 def session(path: Path, *, optimize: bool = False):
@@ -254,18 +254,7 @@ def depthwise_input_control(
     channels = shape[1]
     result = {}
     for split, manifest in manifests.items():
-        totals = [
-            {
-                "channel": index,
-                "input_rms_mean": 0.0,
-                "input_relative_l2_mean": 0.0,
-                "output_relative_l2_mean": 0.0,
-                "rounded_to_zero_fraction_mean": 0.0,
-                "original_zero_fraction_mean": 0.0,
-                "newly_zero_fraction_mean": 0.0,
-            }
-            for index in range(channels)
-        ]
+        observations = [[] for _ in range(channels)]
         global_error = 0.0
         for index in range(len(manifest.samples)):
             batch, _ = manifest.batch(workspace, index)
@@ -277,25 +266,25 @@ def depthwise_input_control(
             restored = (quantized - zero) * scale
             outputs = [runtime.run(None, {activation: values})[0] for runtime in runtimes]
             global_error += error(*outputs)["relative_l2"]
-            for channel, stats in enumerate(totals):
+            for channel, rows in enumerate(observations):
                 left, right = values[:, channel], restored[:, channel]
-                stats["input_rms_mean"] += float(np.sqrt(np.mean(left.astype(np.float64) ** 2)))
-                stats["input_relative_l2_mean"] += error(left, right)["relative_l2"]
-                stats["output_relative_l2_mean"] += error(
-                    outputs[0][:, channel], outputs[1][:, channel]
-                )["relative_l2"]
-                stats["rounded_to_zero_fraction_mean"] += float(np.mean(right == 0))
-                stats["original_zero_fraction_mean"] += float(np.mean(left == 0))
-                stats["newly_zero_fraction_mean"] += float(np.mean((right == 0) & (left != 0)))
+                rows.append({
+                    "input_rms_mean": float(np.sqrt(np.mean(left.astype(np.float64) ** 2))),
+                    "input_relative_l2_mean": error(left, right)["relative_l2"],
+                    "output_relative_l2_mean": error(
+                        outputs[0][:, channel], outputs[1][:, channel])["relative_l2"],
+                    "rounded_to_zero_fraction_mean": float(np.mean(right == 0)),
+                    "original_zero_fraction_mean": float(np.mean(left == 0)),
+                    "newly_zero_fraction_mean": float(np.mean((right == 0) & (left != 0))),
+                })
         count = len(manifest.samples)
-        for stats in totals:
-            for key in stats:
-                if key != "channel":
-                    stats[key] /= count
         result[split] = {
             "samples": count,
             "isolated_output_relative_l2_mean": global_error / count,
-            "channels": totals,
+            "channels": [
+                {"channel": channel, **{key: mean(row[key] for row in rows) for key in rows[0]}}
+                for channel, rows in enumerate(observations)
+            ],
         }
     return {
         "node": target.name,
@@ -366,50 +355,38 @@ def activation_errors(
             for name, match in matches.items():
                 if "float" not in match:
                     continue
-                stats = aggregates.setdefault(
-                    name,
-                    {
-                        "tensor": name,
-                        "order": order.get(name, -1),
-                        "producer": producers.get(name, "input"),
-                        "samples": 0,
-                        "local_relative_l2_mean": 0.0,
-                        "local_relative_l2_max": 0.0,
-                        "accumulated_relative_l2_mean": 0.0,
-                        "accumulated_relative_l2_max": 0.0,
-                        "max_absolute": 0.0,
-                        "clipped_elements": 0,
-                        "elements": 0,
-                    },
-                )
                 before, after, original = (
                     match["pre_qdq"][0],
                     match["post_qdq"][0],
                     match["float"][0],
                 )
                 local, accumulated = error(before, after), error(original, after)
-                stats["samples"] += 1
-                for prefix, observed in (("local", local), ("accumulated", accumulated)):
-                    stats[prefix + "_relative_l2_mean"] += observed["relative_l2"]
-                    stats[prefix + "_relative_l2_max"] = max(
-                        stats[prefix + "_relative_l2_max"], observed["relative_l2"]
-                    )
-                stats["max_absolute"] = max(stats["max_absolute"], accumulated["max_absolute"])
-                if name in ranges:
-                    low, high, scale = ranges[name]
-                    stats.update({"range_min": low, "range_max": high, "scale": scale})
-                    stats["clipped_elements"] += int(
-                        np.count_nonzero((before < low) | (before > high))
-                    )
-                    stats["elements"] += int(before.size)
+                low, high, _ = ranges.get(name, (-float("inf"), float("inf"), None))
+                aggregates.setdefault(name, []).append({
+                    "local_relative_l2": local["relative_l2"],
+                    "accumulated_relative_l2": accumulated["relative_l2"],
+                    "max_absolute": accumulated["max_absolute"],
+                    "clipped_elements": int(np.count_nonzero((before < low) | (before > high))),
+                    "elements": int(before.size) if name in ranges else 0,
+                })
             del outputs, activations, matches
-        for stats in aggregates.values():
+        summaries = []
+        for name, rows in aggregates.items():
+            stats = {"tensor": name, "order": order.get(name, -1),
+                     "producer": producers.get(name, "input"), "samples": len(rows)}
             for prefix in ("local", "accumulated"):
-                stats[prefix + "_relative_l2_mean"] /= stats["samples"]
+                key = prefix + "_relative_l2"
+                stats[key + "_mean"] = mean(row[key] for row in rows)
+                stats[key + "_max"] = max(row[key] for row in rows)
+            stats["max_absolute"] = max(row["max_absolute"] for row in rows)
+            for key in ("clipped_elements", "elements"):
+                stats[key] = sum(row[key] for row in rows)
             stats["clipped_fraction"] = stats["clipped_elements"] / max(stats["elements"], 1)
-        result[split] = sorted(
-            aggregates.values(), key=lambda item: (item["order"], item["tensor"])
-        )
+            if name in ranges:
+                low, high, scale = ranges[name]
+                stats.update({"range_min": low, "range_max": high, "scale": scale})
+            summaries.append(stats)
+        result[split] = sorted(summaries, key=lambda item: (item["order"], item["tensor"]))
         print(f"Matched {len(aggregates)} activation tensors on {split}", flush=True)
     return result
 
@@ -421,21 +398,8 @@ def main() -> None:
     args = parser.parse_args()
     workspace = args.workspace.resolve(strict=True)
     prepared = workspace_file(workspace, args.prepared.as_posix())
-    assets = json.loads(prepared.read_text(encoding="utf-8"))
-    reference = load_reference_config(Path(assets["reference_config_path"]), workspace)
-    if assets["reference_config"] != to_dict(reference):
-        raise ValueError("reference config changed")
-    source = workspace_file(workspace, assets["source_prepared"])
-    if sha256_file(source) != assets["source_prepared_sha256"]:
-        raise ValueError("source prepared hash changed")
-    original = load_prepared(source, reference, workspace)
-    if assets["manifest"] != original["manifest"]:
-        raise ValueError("diagnosis changed the evaluation manifest")
-    matrix = from_dict(CompressionReferenceConfig, assets["matrix"])
-    evaluation = from_dict(DatasetManifest, assets["manifest"])
-    validate_descriptors(matrix, assets["variants"], original["variants"], evaluation, workspace)
-    if json.loads((prepared.parent / "complete.json").read_text()) != {"status": "complete"}:
-        raise ValueError("preparation is incomplete")
+    loaded = load_compression_prepared(prepared, workspace)
+    assets, matrix, evaluation = loaded.assets, loaded.matrix, loaded.manifest
     variants = {
         item["model"]["compression"]["precision"]: item
         for item in assets["variants"]

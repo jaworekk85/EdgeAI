@@ -2,7 +2,7 @@
 
 Phase 4 adds CPU compression tools and a small reference validation. Use the
 [existing CPU dependency setup](cpu_reference.md); no new dependencies, Jetson,
-CUDA, TensorRT, asset download or training is required. The [design](phase_4_plan.md)
+CUDA, TensorRT, asset download or training is required. The [design history](history.md)
 was recorded before implementation. Hardware validation remains in 3B.
 
 ## Prepare and run

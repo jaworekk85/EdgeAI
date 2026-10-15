@@ -7,6 +7,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from time import perf_counter
@@ -282,12 +283,58 @@ def worker(config: ExperimentConfig, manifest: DatasetManifest, workspace: Path)
     )
 
 
+def reference_experiment(
+    reference: ReferenceConfig, model: ModelVariant, artifact: ArtifactIdentity,
+    manifest: DatasetManifest, manifest_path: str, *, experiment: str | None = None,
+) -> ExperimentConfig:
+    """Resolve the same CPU workload/settings for original and compressed models."""
+    return ExperimentConfig(
+        experiment=experiment or reference.experiment,
+        seed=reference.seed,
+        model=model,
+        workload=Workload(
+            "classification", "dataset", manifest_path, reference.preprocessing.crop, 1,
+            split="val", subset=f"{reference.per_class}/class",
+            preprocessing=reference.preprocessing, manifest_sha256=manifest.digest(),
+        ),
+        protocol=reference.protocol, device=reference.device, artifact=artifact,
+        execution=reference.execution, power=reference.power,
+    )
+
+
+def run_worker(config: ExperimentConfig, manifest: DatasetManifest, workspace: Path) -> RunRecord:
+    """One fresh process and request/response directory per measured configuration."""
+    with tempfile.TemporaryDirectory(prefix="edge-ai-worker-") as temporary:
+        request, response = Path(temporary) / "request.json", Path(temporary) / "response.json"
+        request.write_text(
+            json.dumps({"config": to_dict(config), "manifest": to_dict(manifest)}),
+            encoding="utf-8",
+        )
+        completed = subprocess.run(
+            [sys.executable, "-m", "edge_ai.reference", "worker", "--workspace", str(workspace),
+             "--request", str(request), "--response", str(response)],
+            capture_output=True, text=True,
+            timeout=110 + (config.protocol.sustained_duration_s or 0),
+        )
+        if completed.returncode:
+            raise RuntimeError(f"reference worker failed: {completed.stderr}")
+        return from_dict(RunRecord, json.loads(response.read_text(encoding="utf-8")))
+
+
+def with_baseline(record: RunRecord, baseline: RunRecord | None) -> RunRecord:
+    if baseline is None:
+        return record
+    resolved = replace(
+        record.config, baseline_id=baseline.run_id,
+        changed_components=tuple(sorted(baseline_changes(baseline, record))),
+    )
+    return replace(record, config=resolved, run_id=new_run_id(resolved))
+
+
 def run_reference(
     config: ReferenceConfig, prepared: Path, workspace: Path,
     *, sustained_duration_s: float | None = None, sustained_max_iterations: int | None = None,
 ) -> list[Path]:
-    import tempfile
-
     started = perf_counter()
     assets = load_prepared(prepared, config, workspace)
     if sustained_duration_s is not None or sustained_max_iterations is not None:
@@ -308,73 +355,20 @@ def run_reference(
     manifest = from_dict(DatasetManifest, assets["manifest"])
     groups = []
     baselines = {}
-    with tempfile.TemporaryDirectory(prefix="edge-ai-reference-") as temporary:
-        temporary = Path(temporary)
-        for backend in config.runtimes:
-            records = []
-            for item in assets["variants"]:
-                model = replace(from_dict(ModelVariant, item["model"]), runtime=backend)
-                experiment = ExperimentConfig(
-                    experiment=config.experiment,
-                    seed=config.seed,
-                    model=model,
-                    workload=Workload(
-                        "classification",
-                        "dataset",
-                        assets["manifest_path"],
-                        config.preprocessing.crop,
-                        1,
-                        split="val",
-                        subset=f"{config.per_class}/class",
-                        preprocessing=config.preprocessing,
-                        manifest_sha256=manifest.digest(),
-                    ),
-                    protocol=config.protocol,
-                    device=config.device,
-                    artifact=from_dict(ArtifactIdentity, item[backend]),
-                    execution=config.execution,
-                    power=config.power,
-                )
-                request, response = temporary / "request.json", temporary / "response.json"
-                request.write_text(
-                    json.dumps({"config": to_dict(experiment), "manifest": to_dict(manifest)}),
-                    encoding="utf-8",
-                )
-                completed = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "edge_ai.reference",
-                        "worker",
-                        "--workspace",
-                        str(workspace),
-                        "--request",
-                        str(request),
-                        "--response",
-                        str(response),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=110 + (config.protocol.sustained_duration_s or 0),
-                )
-                if completed.returncode != 0:
-                    raise RuntimeError(f"reference worker failed: {completed.stderr}")
-                record = from_dict(RunRecord, json.loads(response.read_text(encoding="utf-8")))
-                baseline = baselines.get(model.architecture)
-                if baseline is None and records:
-                    baseline = records[0]
-                if baseline is not None:
-                    resolved = replace(
-                        record.config,
-                        baseline_id=baseline.run_id,
-                        changed_components=tuple(sorted(baseline_changes(baseline, record))),
-                    )
-                    record = replace(record, config=resolved, run_id=new_run_id(resolved))
-                baselines.setdefault(model.architecture, record)
-                records.append(record)
-                print(f"Profile complete: {model.architecture} / {backend}", flush=True)
-            reports = render_reports(records)
-            groups.append((records, reports))
+    for backend in config.runtimes:
+        records = []
+        for item in assets["variants"]:
+            model = replace(from_dict(ModelVariant, item["model"]), runtime=backend)
+            experiment = reference_experiment(
+                config, model, from_dict(ArtifactIdentity, item[backend]),
+                manifest, assets["manifest_path"],
+            )
+            baseline = baselines.get(model.architecture) or (records[0] if records else None)
+            record = with_baseline(run_worker(experiment, manifest, workspace), baseline)
+            baselines.setdefault(model.architecture, record)
+            records.append(record)
+            print(f"Profile complete: {model.architecture} / {backend}", flush=True)
+        groups.append((records, render_reports(records)))
     paths = []
     for records, reports in groups:
         for record in records:

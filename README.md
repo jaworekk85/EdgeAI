@@ -1,86 +1,45 @@
 # EdgeAI
 
 Research framework for measuring resource-efficient AI on embedded hardware.
-First target: NVIDIA Jetson Orin Nano Super, with a hardware-independent core
-and CPU/mock paths for development on a laptop.
+Develop on a laptop with CPU/mock backends; the first hardware target is
+NVIDIA Jetson Orin Nano Super.
 
-**Current stage: Phase 4 CPU — implemented and verified; ready for review.**
-PyTorch and ONNX Runtime CPU inference, timing, sampled process memory, quality
-evaluation and immutable reports are implemented alongside the Phase 1 core.
-Sustained CPU runs and offline telemetry parsing/replay prepare for Phase 3B.
-Jetson execution and real power/thermal measurement await the physical device.
-CPU FP16, calibrated INT8, partial weight-only INT4 and dense pruning masks have
-their own provenance and reference validation; hardware acceptance remains pending.
-
-## Start here
-
-- [Development specification](EDGE_AI_AGENT_RESEARCH_SPEC.md): scope and mandatory rules.
-- [Proposed architecture](docs/research_framework.md): modules, interfaces and dependencies.
-- [Status](STATUS.md): completed work, questions and phase boundary.
-- [Core API usage](docs/core_usage.md): configuration, mocks and result contracts.
-- [Approved Phase 2 design](docs/phase_2_plan.md).
-- [CPU reference usage](docs/cpu_reference.md): tested dependencies, preparation and benchmark commands.
-- [Phase 3A design](docs/phase_3a_plan.md) and [usage](docs/phase_3a_usage.md).
-- [CPU/hardware roadmap](docs/cpu_hardware_roadmap.md): phases 4–6 can develop before 3B.
-- [Phase 4 design](docs/phase_4_plan.md) and [CPU compression usage](docs/phase_4_usage.md).
-- [Profiling protocol](docs/profiling_protocol.md).
-- [Hardware setup plan](docs/hardware_setup.md).
-- [Scope and boundaries](docs/scope_and_boundaries.md).
+CPU inference, compression tools and immutable reports are implemented.
+Jetson support is pending. See [current status](STATUS.md) for limitations and
+the next review, and the [documentation index](docs/README.md) for task guides.
 
 ## Local setup
 
-Python 3.10 or newer. The core uses the standard library and PyYAML.
+Python 3.10 or newer; the core uses the standard library and PyYAML.
 
 ```sh
 python -m venv .venv
 ```
 
-Activate the environment with `.venv\Scripts\Activate.ps1` in PowerShell,
-or `source .venv/bin/activate` on Linux/macOS. Then:
+Activate with `.venv\Scripts\Activate.ps1` in PowerShell or
+`source .venv/bin/activate` on Linux/macOS, then:
 
 ```sh
 python -m pip install -e ".[dev]"
-python -c "import edge_ai; print(edge_ai.__version__)"
+python -m pytest tests -q
+python -m ruff check src tests scripts
 ```
 
-The import prints the unreleased development version `0.0.0`. Run the CPU/mock
-checks with:
+Model execution needs the optional dependencies documented in
+[CPU setup and reference commands](docs/cpu_reference.md).
+Core imports do not load inference, hardware or YAML libraries.
 
-```sh
-python -m pytest -q
-python -m ruff check src tests
-```
+## Find your way
 
-The reference commands require optional CPU/export/reporting dependencies; follow
-[CPU reference usage](docs/cpu_reference.md) to install the tested CPU wheels.
-Core imports do not load PyTorch, ONNX Runtime, CUDA, TensorRT or even PyYAML.
-PyYAML is loaded only when reading/writing configuration or results.
+- [Code map and execution flow](docs/research_framework.md).
+- [Documentation by task](docs/README.md), including compression and diagnostics.
+- [Development decisions and verification history](docs/history.md).
+- [Authoritative specification](EDGE_AI_AGENT_RESEARCH_SPEC.md): scope, invariants
+  and phase review rules. Read before substantial changes.
 
-## Repository layout
+Generated data, weights, artifacts and public results are ignored. Partner data,
+configs and results belong in ignored `private/`. CPU mock power produces
+estimated energy only; CPU timings do not predict Jetson performance.
+The small public reference validates the pipeline, not research conclusions.
 
-```text
-src/edge_ai/   Core package and dedicated subsystem packages
-configs/       Typed YAML fragments, mock fixture and CPU reference configuration
-experiments/   Reference pipeline validation only, until research is requested
-scripts/       Future entry points, including on-device tools
-docs/          Architecture, measurement protocol and setup guidance
-tests/         Core invariants, offline CPU adapter tests and opt-in public smoke
-results/       Immutable public run directories (generated runs ignored)
-private/       Local partner data/configs/adapters/results; entirely git-ignored
-STATUS.md      Work-session log and pending review
-```
-
-All reported quantities must distinguish measurements from estimates.
-Mock power must never produce a measured `energy_j` value. Private data must
-never enter public result directories. See the specification for the complete
-invariants and phase plan.
-
-## Development
-
-Phase 3A was accepted; Phase 4 follows the authorized CPU scope. Stop for review before Phase 5.
-Phase 3B remains pending and does not block separately reviewed CPU portions of 4–6.
-Read the specification before substantial changes and update
-`STATUS.md` after each work session.
-
-The remote repository is <https://github.com/jaworekk85/EdgeAI>.
-No distribution license has been chosen yet.
+Development version: `0.0.0`. No distribution license has been selected.

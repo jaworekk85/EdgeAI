@@ -1,9 +1,8 @@
-# Phase 1 core API
+# Core API
 
-The architecture review and core implementation were authorized together on
-2026-10-11. The examples below exercise the original contracts with synthetic
-data. Real CPU execution, profiling and reports now exist; see
-[CPU reference usage](cpu_reference.md) for the Phase 2 extensions.
+The example exercises the core with synthetic data. See [CPU reference
+usage](cpu_reference.md) for model execution, and the [code map](research_framework.md)
+for module responsibilities.
 
 ## Configuration and mocks
 
@@ -52,7 +51,7 @@ memory values are unavailable, not zero. Its power clock is synthetic and does
 not follow the duration between `start()` and `stop()`. The estimate above must
 not be presented as energy consumed by the inference above. In particular, do
 not divide it by a real inference count without explicitly describing that
-synthetic measurement window. Idle baseline collection is a later profiler task.
+synthetic measurement window. The CPU profiler collects its own idle baseline.
 
 Git capture fails if a commit cannot be obtained; it does not invent provenance.
 It captures the dirty flag including untracked, nonignored files. Runtime versions
@@ -67,11 +66,13 @@ device profile, raw `TimingTrace`, `MemoryReport`, run duration, optional raw po
 trace/energy, task-quality metric/value and temperatures. Config includes the seed,
 model/compression identity, workload, protocol, baseline ID and changed components.
 Unknown metrics remain `None`. Version 1 covers the original core; version 2 adds
-CPU execution/artifact/data/memory/idle provenance. Old version 1 files remain readable.
+CPU execution/artifact/data/memory/idle provenance. Version 3 covers sustained
+runs and version 4 transformed models. All four versions remain readable.
 
 Construct timings from measurement samples only; `warmup_iterations_excluded`
 must match the configured warm-up count and the sample count must match
-`iterations * repetitions`. Synthetic timings must declare `measured=False` and
+`iterations * repetitions` for ordinary runs; sustained runs use actual completed
+counts. Synthetic timings must declare `measured=False` and
 `clock="synthetic"`. `summary(batch_size)` derives mean, median, p95, p99 and
 explicitly scoped inferences/items per second. End-to-end timing is separate.
 Actual timing/synchronization/warm-up exclusion uses the implemented Phase 2 runner.
@@ -82,19 +83,20 @@ samples, nonfinite/negative power, unknown rails and declared sample loss are
 refused. `EnergyResult` stores total measured or estimated joules and the matching
 method, window and sampling rate. Optional window-average per-inference energy
 retains the same provenance and declares its averaging method. An optional idle
-power value is separate; above-idle reports are later reporting work. Record
+power value is separate; reports preserve above-idle estimate labels. Record
 validation checks energy against the raw trace and validates counted timings
 against the energy window when clocks share a basis.
 
 Use `new_run_id(config)` from `edge_ai.records.store` for a UTC timestamp plus
 randomized short hash, then build and validate the record. `ResultStore(workspace)`:
 
-- `write(record)` reserves a fresh directory exclusively. Public results go to
+- `write(record, reports=...)` reserves a fresh directory exclusively. Public results go to
   `results/<experiment>/<run_id>/`; private results to
   `private/results/<experiment>/<run_id>/`. Known private paths cannot be declared
   public. Remote/private identifiers still require truthful caller classification.
 - Writes `config.yaml`, `device.json`, the complete record as `metrics.json`, raw
-  trace JSON under `traces/`, and a `plots/` directory for later reporting.
+  trace JSON under `traces/` and prepared report/plot artifacts. Real CPU records
+  require their standard reports; compression adds metadata and kernel evidence.
 - Writes `incomplete.json` first and `complete.json` last. A successful run retains
   both; the completion marker is authoritative. Failed reservations remain on disk
   and cannot be reused. API writes never modify an existing run directory.
